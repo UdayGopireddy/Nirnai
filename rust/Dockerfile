@@ -1,0 +1,22 @@
+# Build stage
+FROM rust:1.85-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+
+RUN cargo build --release -p server
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/target/release/nirnai-server /app/nirnai-server
+
+ENV PORT=8000
+EXPOSE 8000
+
+CMD ["/app/nirnai-server"]
