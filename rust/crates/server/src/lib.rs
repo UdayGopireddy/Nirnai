@@ -1,3 +1,4 @@
+// NirnAI Server v2.0.0
 pub mod nirnai;
 
 use std::collections::HashMap;
