@@ -1,0 +1,31 @@
+# Rust
+rust/target/
+**/*.rs.bk
+
+# Node / Extension
+node_modules/
+dist/
+*.map
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# OS
+.DS_Store
+*.swp
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Build artifacts
+nirnai-extension.zip
+*.db
+
+# IDE
+.idea/
+.vscode/settings.json

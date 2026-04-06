@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NirnAI - Clear decisions. Every purchase.</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🛡️</span>
+        <h1>NirnAI</h1>
+      </div>
+      <p class="tagline">Clear decisions. Every purchase.</p>
+    </header>
+
+    <!-- Loading State -->
+    <div id="loading" class="state">
+      <div class="spinner"></div>
+      <p>Analyzing product...</p>
+    </div>
+
+    <!-- Not a Product Page -->
+    <div id="not-product" class="state hidden">
+      <div class="empty-icon">🔍</div>
+      <p>Navigate to an Amazon product page to get analysis.</p>
+    </div>
+
+    <!-- Error State -->
+    <div id="error" class="state hidden">
+      <div class="empty-icon">⚠️</div>
+      <p id="error-message">Something went wrong. Please try again.</p>
+      <button id="retry-btn" class="btn btn-primary">Retry Analysis</button>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="hidden">
+      <!-- Decision Stamp Banner -->
+      <div id="stamp-banner" class="stamp-banner">
+        <div class="stamp-main">
+          <span id="stamp-icon" class="stamp-icon"></span>
+          <span id="stamp-label" class="stamp-label"></span>
+        </div>
+        <div id="stamp-reasons" class="stamp-reasons"></div>
+        <div class="stamp-signals">
+          <span id="stamp-purchase-signal" class="stamp-signal"></span>
+          <span id="stamp-health-signal" class="stamp-signal"></span>
+        </div>
+        <div id="confidence-bar" class="confidence">
+          <span class="confidence-label">Confidence</span>
+          <div class="confidence-track"><div id="confidence-fill" class="confidence-fill"></div></div>
+          <span id="confidence-value" class="confidence-value"></span>
+        </div>
+      </div>
+
+      <!-- Product Info -->
+      <div id="product-info" class="product-info">
+        <img id="product-image" class="product-image" src="" alt="Product">
+        <div class="product-details">
+          <h2 id="product-title" class="product-title"></h2>
+          <p id="product-price" class="product-price"></p>
+        </div>
+      </div>
+
+      <!-- Scores -->
+      <div class="scores-grid">
+        <!-- Purchase Score -->
+        <div class="score-card">
+          <div class="score-header">
+            <span>🛒 Purchase Score</span>
+            <span id="purchase-score" class="score-value">--</span>
+          </div>
+          <div class="score-bar">
+            <div id="purchase-bar" class="score-fill"></div>
+          </div>
+          <div class="breakdown" id="purchase-breakdown"></div>
+        </div>
+
+        <!-- Review Trust -->
+        <div class="score-card" id="trust-card">
+          <div class="score-header">
+            <span>🔍 Review Trust</span>
+            <span id="trust-score" class="score-value">--</span>
+          </div>
+          <div class="score-bar">
+            <div id="trust-bar" class="score-fill"></div>
+          </div>
+          <div class="breakdown" id="trust-breakdown"></div>
+        </div>
+
+        <!-- Health Score -->
+        <div class="score-card hidden" id="health-card">
+          <div class="score-header">
+            <span>🥗 Health Score</span>
+            <span id="health-score" class="score-value">--</span>
+          </div>
+          <div class="score-bar">
+            <div id="health-bar" class="score-fill"></div>
+          </div>
+          <div class="breakdown" id="health-breakdown"></div>
+        </div>
+      </div>
+
+      <!-- Warnings & Positives -->
+      <div id="signals-section" class="signals-section">
+        <div id="warnings-list" class="signal-list warnings hidden">
+          <h3>⚠️ Warnings</h3>
+          <ul id="warnings-ul"></ul>
+        </div>
+        <div id="positives-list" class="signal-list positives hidden">
+          <h3>✅ Positives</h3>
+          <ul id="positives-ul"></ul>
+        </div>
+      </div>
+
+      <!-- NirnAI Summary -->
+      <div class="summary-card">
+        <h3>NirnAI Summary</h3>
+        <p id="summary-text"></p>
+      </div>
+
+      <!-- Alternative Suggestion -->
+      <div id="suggestion-card" class="suggestion-card hidden">
+        <h3>💡 Better Alternative</h3>
+        <p id="suggestion-name" class="suggestion-name"></p>
+        <p id="suggestion-reason" class="suggestion-reason"></p>
+        <a id="suggestion-link" class="suggestion-link" href="#" target="_blank" rel="noopener">🔍 Search for this</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="../../dist/popup.js"></script>
+</body>
+</html>

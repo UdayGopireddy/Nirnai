@@ -1,0 +1,94 @@
+{
+  "manifest_version": 3,
+  "name": "NirnAI",
+  "version": "1.1.0",
+  "description": "AI-powered shopping assistant that analyzes product quality, price fairness, seller trust, and health impact.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.amazon.in/*",
+    "https://www.amazon.com/*",
+    "https://www.walmart.com/*",
+    "https://www.target.com/*",
+    "https://www.airbnb.com/*",
+    "https://www.airbnb.co.in/*",
+    "https://www.booking.com/*",
+    "https://www.expedia.com/*",
+    "https://www.costco.com/*",
+    "https://www.bestbuy.com/*",
+    "https://www.homedepot.com/*",
+    "https://www.lowes.com/*",
+    "https://www.ebay.com/*",
+    "https://www.wayfair.com/*",
+    "https://www.macys.com/*",
+    "https://www.nordstrom.com/*",
+    "https://www.cvs.com/*",
+    "https://www.walgreens.com/*",
+    "https://www.nike.com/*",
+    "https://www.apple.com/*",
+    "https://www.samsung.com/*",
+    "https://www.dyson.com/*",
+    "https://www.vrbo.com/*",
+    "https://www.agoda.com/*",
+    "https://www.hotels.com/*",
+    "https://www.tripadvisor.com/*",
+    "https://www.google.com/travel/*",
+    "https://zpct3iakih.us-east-1.awsapprunner.com/*"
+  ],
+  "background": {
+    "service_worker": "dist/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.amazon.in/*",
+        "https://www.amazon.com/*",
+        "https://www.walmart.com/*",
+        "https://www.target.com/*",
+        "https://www.airbnb.com/*",
+        "https://www.airbnb.co.in/*",
+        "https://www.booking.com/*",
+        "https://www.expedia.com/*",
+        "https://www.costco.com/*",
+        "https://www.bestbuy.com/*",
+        "https://www.homedepot.com/*",
+        "https://www.lowes.com/*",
+        "https://www.ebay.com/*",
+        "https://www.wayfair.com/*",
+        "https://www.macys.com/*",
+        "https://www.nordstrom.com/*",
+        "https://www.cvs.com/*",
+        "https://www.walgreens.com/*",
+        "https://www.nike.com/*",
+        "https://www.apple.com/*",
+        "https://www.samsung.com/*",
+        "https://www.dyson.com/*",
+        "https://www.vrbo.com/*",
+        "https://www.agoda.com/*",
+        "https://www.hotels.com/*",
+        "https://www.tripadvisor.com/*",
+        "https://www.google.com/travel/*"
+      ],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

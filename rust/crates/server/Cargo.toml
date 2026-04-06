@@ -1,0 +1,30 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+api = { path = "../api" }
+async-stream = "0.3"
+axum = "0.8"
+runtime = { path = "../runtime" }
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+rusqlite = { version = "0.33", features = ["bundled"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "time"] }
+tools = { path = "../tools" }
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[[bin]]
+name = "nirnai-server"
+path = "src/main.rs"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+[lints]
+workspace = true
