@@ -177,12 +177,8 @@ pub async fn create_compare_session(
         }
     });
 
-    // Determine base URL for the compare page
-    let port = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(8000);
-    let url = format!("http://localhost:{}/compare/{}", port, id);
+    // Use a relative URL so it works on both localhost and production
+    let url = format!("/compare/{}", id);
 
     Ok(StartResponse { id, url })
 }
