@@ -10,6 +10,7 @@ mod homepage;
 mod intent;
 mod inventory;
 mod nirnai;
+mod scraper;
 
 #[tokio::main]
 async fn main() {

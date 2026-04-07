@@ -3,9 +3,11 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::warn;
 
 use crate::compare::{self, NirnaiState};
 use crate::nirnai::ProductData;
+use crate::scraper;
 
 // ── POST /intent/link ──
 
@@ -25,7 +27,7 @@ pub struct IntentResponse {
 }
 
 /// POST /intent/link — User pasted a single URL.
-/// Creates a compare session with one listing and returns the compare URL.
+/// Scrapes the page for listing data, then creates a compare session.
 pub async fn intent_link(
     State(state): State<NirnaiState>,
     Json(request): Json<LinkRequest>,
@@ -39,19 +41,30 @@ pub async fn intent_link(
         ));
     }
 
-    // Detect source site from URL
-    let source_site = detect_source_site(&url);
-
-    // Build a minimal ProductData from the URL — the AI engine will work with what it has
-    let listing = ProductData {
-        title: String::new(),
-        url: url.clone(),
-        source_site: source_site.clone(),
-        page_type: if is_travel_site(&source_site) { "travel".into() } else { "product".into() },
-        ..default_product_data()
+    // Scrape the page to extract listing data
+    let listing = match scraper::scrape_url(&url).await {
+        Ok(data) => {
+            tracing::info!(
+                "Scraped {}: title={:?}, price={:?}, rating={:?}, reviews={:?}",
+                url, data.title, data.price, data.rating, data.review_count
+            );
+            data
+        }
+        Err(e) => {
+            warn!("Scrape failed for {}: {}. Falling back to URL-only.", url, e);
+            // Fallback: build minimal ProductData from URL
+            let source_site = detect_source_site(&url);
+            ProductData {
+                title: String::new(),
+                url: url.clone(),
+                source_site: source_site.clone(),
+                page_type: if is_travel_site(&source_site) { "travel".into() } else { "product".into() },
+                ..Default::default()
+            }
+        }
     };
 
-    // Create a compare session with this single listing
+    // Create a compare session with this listing
     let resp = compare::create_compare_session(
         &state.sessions,
         &state.inventory,
@@ -199,23 +212,23 @@ pub async fn intent_compare(
         ));
     }
 
-    let listings: Vec<ProductData> = urls
-        .iter()
-        .map(|url| {
-            let source_site = detect_source_site(url);
-            ProductData {
-                title: String::new(),
-                url: url.clone(),
-                source_site: source_site.clone(),
-                page_type: if is_travel_site(&source_site) {
-                    "travel".into()
-                } else {
-                    "product".into()
-                },
-                ..default_product_data()
+    let mut listings = Vec::new();
+    for url in &urls {
+        let listing = match scraper::scrape_url(url).await {
+            Ok(data) => data,
+            Err(e) => {
+                warn!("Scrape failed for {}: {}", url, e);
+                let source_site = detect_source_site(url);
+                ProductData {
+                    url: url.clone(),
+                    source_site: source_site.clone(),
+                    page_type: if is_travel_site(&source_site) { "travel".into() } else { "product".into() },
+                    ..Default::default()
+                }
             }
-        })
-        .collect();
+        };
+        listings.push(listing);
+    }
 
     let context = format!("Direct comparison of {} URLs from NirnAI homepage", urls.len());
 
@@ -278,31 +291,4 @@ fn is_travel_site(source: &str) -> bool {
     )
 }
 
-fn default_product_data() -> ProductData {
-    ProductData {
-        title: String::new(),
-        brand: String::new(),
-        price: String::new(),
-        currency: String::new(),
-        rating: String::new(),
-        review_count: String::new(),
-        seller: String::new(),
-        fulfiller: String::new(),
-        ingredients: String::new(),
-        nutrition_info: String::new(),
-        return_policy: String::new(),
-        delivery: String::new(),
-        category: String::new(),
-        url: String::new(),
-        image_url: String::new(),
-        barcode: String::new(),
-        source_site: String::new(),
-        page_type: String::new(),
-        country_code: String::new(),
-        currency_code: String::new(),
-        locale: String::new(),
-        tax_included: false,
-        shipping_region: String::new(),
-        measurement_system: String::new(),
-    }
-}
+
