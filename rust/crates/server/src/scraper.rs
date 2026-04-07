@@ -286,19 +286,22 @@ fn extract_airbnb(doc: &Html, html: &str, url: &str, data: &mut ProductData) {
         }
     }
 
-    // Superhost status
+    // Superhost status & host credentials
     if data.fulfiller.is_empty() {
-        let mut host_info = Vec::new();
+        let mut host_info: Vec<String> = Vec::new();
+        if html.contains("Guest favorite") || html.contains("guest favorite") || html.contains("Guest Favorite") {
+            host_info.push("Guest Favorite".to_string());
+        }
         if html.contains("Superhost") {
-            host_info.push("Superhost");
+            host_info.push("Superhost".to_string());
         }
         if html.contains("identity verified") || html.contains("Identity verified") {
-            host_info.push("Identity verified");
+            host_info.push("Identity verified".to_string());
         }
         // Years hosting
         if let Some(re) = Regex::new(r"(\d+)\s*years?\s*hosting").ok() {
             if let Some(cap) = re.captures(html) {
-                host_info.push("experienced host");
+                host_info.push(format!("{} years hosting", &cap[1]));
             }
         }
         if !host_info.is_empty() {

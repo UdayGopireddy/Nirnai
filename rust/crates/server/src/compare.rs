@@ -252,14 +252,16 @@ async fn analyze_batch_internal(
         "\n\nDOMAIN: SHOPPING. Apply standard product scoring rules. Labels should be Smart Buy / Check / Avoid."
     };
 
-    // Extract area/search context if present (appended by content script after URL)
-    let extra_context = if let Some(idx) = search_context.find("\n\nAREA CONTEXT:") {
-        search_context[idx..].to_string()
-    } else if let Some(idx) = search_context.find("\n\nSEARCH CONTEXT:") {
-        search_context[idx..].to_string()
-    } else {
-        String::new()
-    };
+    // Extract area/search context and notes if present (appended by content script or intent handler)
+    let mut extra_context = String::new();
+    for prefix in ["\n\nAREA CONTEXT:", "\n\nSEARCH CONTEXT:", "\n\nNOTE:"] {
+        if let Some(idx) = search_context.find(prefix) {
+            // Find the end: next \n\n or end of string
+            let rest = &search_context[idx..];
+            let end = rest[2..].find("\n\n").map(|i| i + 2).unwrap_or(rest.len());
+            extra_context.push_str(&rest[..end]);
+        }
+    }
 
     let system_prompt = format!(
         "{}{}{}",

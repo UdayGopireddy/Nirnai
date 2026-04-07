@@ -757,7 +757,15 @@ F. A listing with a dramatic negative signal (safety, cleanliness, dishonesty) s
 // ── Format product data as a prompt ──
 
 fn format_product_prompt(product: &ProductData) -> String {
-    let mut parts = vec![format!("Analyze this product:\n")];
+    let is_travel = matches!(
+        product.source_site.as_str(),
+        "airbnb" | "booking" | "expedia" | "vrbo" | "hotels" | "tripadvisor" | "agoda" | "googletravel"
+    );
+
+    let mut parts = vec![format!(
+        "Analyze this {}:\n",
+        if is_travel { "listing" } else { "product" }
+    )];
 
     if !product.title.is_empty() {
         parts.push(format!("Title: {}", product.title));
@@ -767,6 +775,8 @@ fn format_product_prompt(product: &ProductData) -> String {
     }
     if !product.price.is_empty() {
         parts.push(format!("Price: {} {}", product.price, product.currency));
+    } else if is_travel {
+        parts.push("Price: Not available (check the listing page for current pricing)".to_string());
     }
     if !product.rating.is_empty() {
         parts.push(format!("Rating: {}", product.rating));
@@ -775,25 +785,53 @@ fn format_product_prompt(product: &ProductData) -> String {
         parts.push(format!("Review count: {}", product.review_count));
     }
     if !product.seller.is_empty() {
-        parts.push(format!("Seller: {}", product.seller));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Host" } else { "Seller" },
+            product.seller
+        ));
     }
     if !product.fulfiller.is_empty() {
-        parts.push(format!("Fulfilled by: {}", product.fulfiller));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Host credentials" } else { "Fulfilled by" },
+            product.fulfiller
+        ));
     }
     if !product.ingredients.is_empty() {
-        parts.push(format!("Ingredients: {}", product.ingredients));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Amenities" } else { "Ingredients" },
+            product.ingredients
+        ));
     }
     if !product.nutrition_info.is_empty() {
-        parts.push(format!("Nutrition: {}", product.nutrition_info));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Category ratings" } else { "Nutrition" },
+            product.nutrition_info
+        ));
     }
     if !product.return_policy.is_empty() {
-        parts.push(format!("Return policy: {}", product.return_policy));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Cancellation policy" } else { "Return policy" },
+            product.return_policy
+        ));
     }
     if !product.delivery.is_empty() {
-        parts.push(format!("Delivery: {}", product.delivery));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Location & specs" } else { "Delivery" },
+            product.delivery
+        ));
     }
     if !product.category.is_empty() {
-        parts.push(format!("Category: {}", product.category));
+        parts.push(format!(
+            "{}: {}",
+            if is_travel { "Property type & description" } else { "Category" },
+            product.category
+        ));
     }
     if !product.source_site.is_empty() {
         parts.push(format!("Source: {}", product.source_site));

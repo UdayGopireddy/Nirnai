@@ -64,12 +64,28 @@ pub async fn intent_link(
         }
     };
 
+    // Build a rich context string from scraped data
+    let mut context_parts = vec![format!("Single listing analysis from URL: {}", url)];
+    if !listing.barcode.is_empty() {
+        context_parts.push(format!("\n\nSEARCH CONTEXT: {}", listing.barcode));
+    }
+    if listing.price.is_empty() {
+        context_parts.push(
+            "\n\nNOTE: Price was not available from server-side page data. \
+             Focus analysis on quality signals (rating, reviews, host, amenities, \
+             cancellation policy, location). Set the price field to \"Check listing\" \
+             rather than inventing a price. Mention in why_ranked that the user should \
+             verify the price on the actual listing page."
+                .to_string(),
+        );
+    }
+
     // Create a compare session with this listing
     let resp = compare::create_compare_session(
         &state.sessions,
         &state.inventory,
         vec![listing],
-        format!("Single product analysis from URL: {}", url),
+        context_parts.join(""),
     )
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))))?;
@@ -230,7 +246,21 @@ pub async fn intent_compare(
         listings.push(listing);
     }
 
-    let context = format!("Direct comparison of {} URLs from NirnAI homepage", urls.len());
+    let mut context = format!("Direct comparison of {} URLs from NirnAI homepage", urls.len());
+    // If any listing has search context (dates/guests), include it
+    if let Some(ctx) = listings.iter().find_map(|l| {
+        if l.barcode.is_empty() { None } else { Some(&l.barcode) }
+    }) {
+        context.push_str(&format!("\n\nSEARCH CONTEXT: {}", ctx));
+    }
+    // If any listing is missing price, add note
+    if listings.iter().any(|l| l.price.is_empty()) {
+        context.push_str(
+            "\n\nNOTE: Some listings have no price data available from server-side scraping. \
+             Set price to \"Check listing\" for those. Focus ranking on quality signals and \
+             mention in why_ranked that users should verify prices on the actual listing pages."
+        );
+    }
 
     let resp = compare::create_compare_session(&state.sessions, &state.inventory, listings, context)
         .await
