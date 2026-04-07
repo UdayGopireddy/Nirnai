@@ -748,14 +748,63 @@ footer {{
         <label>What are you looking for?</label>
         <input type="text" id="search-input" placeholder="Best 2BR in Tampa under $200/night" autocomplete="off">
       </div>
-      <div class="input-row">
+
+      <!-- Travel filters — shown when a travel query is detected -->
+      <div id="travel-filters" style="display:none;">
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0 6px;">
+          <span style="font-size:14px;">🗓️</span>
+          <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Trip Details</span>
+          <span style="font-size:10px;color:#475569;margin-left:auto;">optional — or include in your search above</span>
+        </div>
+        <div class="input-row" style="grid-template-columns:1fr 1fr;">
+          <div class="input-group">
+            <label>Check-in</label>
+            <input type="date" id="search-checkin">
+          </div>
+          <div class="input-group">
+            <label>Check-out</label>
+            <input type="date" id="search-checkout">
+          </div>
+        </div>
+        <div class="input-row" style="grid-template-columns:1fr 1fr 1fr;">
+          <div class="input-group">
+            <label>Guests</label>
+            <select id="search-guests" style="width:100%;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:10px;color:var(--text-primary);font-size:14px;appearance:auto;">
+              <option value="">Any</option>
+              <option value="1">1 guest</option>
+              <option value="2">2 guests</option>
+              <option value="3">3 guests</option>
+              <option value="4">4 guests</option>
+              <option value="5">5 guests</option>
+              <option value="6">6 guests</option>
+              <option value="8">8+ guests</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Property</label>
+            <select id="search-property" style="width:100%;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:10px;color:var(--text-primary);font-size:14px;appearance:auto;">
+              <option value="">Any type</option>
+              <option value="entire_home">Entire place</option>
+              <option value="private_room">Private room</option>
+              <option value="hotel">Hotel</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Budget / night</label>
+            <input type="text" id="search-budget" placeholder="$100–$300">
+          </div>
+        </div>
+      </div>
+
+      <!-- Category row — shown for non-travel queries -->
+      <div id="generic-filters" class="input-row">
         <div class="input-group">
           <label>Category</label>
           <input type="text" id="search-category" placeholder="Travel, Electronics…">
         </div>
         <div class="input-group">
           <label>Budget</label>
-          <input type="text" id="search-budget" placeholder="$100–$300">
+          <input type="text" id="search-budget-generic" placeholder="$100–$300">
         </div>
       </div>
       <button class="go-btn" id="go-search" onclick="handleSearch()">
@@ -886,6 +935,30 @@ document.getElementById('search-input').addEventListener('keydown', e => {{
   if (e.key === 'Enter') handleSearch();
 }});
 
+// ── Travel detection for search input ──
+const travelWords = ['hotel','stay','airbnb','booking','resort','hostel','apartment','villa',
+  'cabin','cottage','bedroom','night','per night','guest','guests','check-in','checkout',
+  'new york','nyc','tampa','miami','los angeles','chicago','seattle','boston','san francisco',
+  'austin','denver','nashville','orlando','vegas','atlanta','portland','dallas','houston',
+  'london','paris','tokyo','barcelona','rome','dubai','bali','cancun','hawaii','maui',
+  'denver','phoenix','san diego','portland'];
+let travelMode = false;
+
+function checkTravelMode() {{
+  const q = document.getElementById('search-input').value.toLowerCase();
+  const isTravel = travelWords.some(w => q.includes(w)) || q.length === 0;
+  if (isTravel !== travelMode) {{
+    travelMode = isTravel;
+    document.getElementById('travel-filters').style.display = isTravel ? 'block' : 'none';
+    document.getElementById('generic-filters').style.display = isTravel ? 'none' : 'grid';
+  }}
+}}
+
+document.getElementById('search-input').addEventListener('input', checkTravelMode);
+document.getElementById('search-input').addEventListener('focus', checkTravelMode);
+// Initialize on load
+checkTravelMode();
+
 // ── Toast helper ──
 function showToast(msg) {{
   const t = document.getElementById('toast');
@@ -979,8 +1052,25 @@ async function handleSearch() {{
   const query = document.getElementById('search-input').value.trim();
   if (!query) return showToast('Describe what you\'re looking for');
 
-  const category = document.getElementById('search-category').value.trim();
-  const budget = document.getElementById('search-budget').value.trim();
+  // Collect filters based on current mode
+  let category = '';
+  let budget = '';
+  let checkin = '';
+  let checkout = '';
+  let guests = '';
+  let propertyType = '';
+
+  if (travelMode) {{
+    checkin = document.getElementById('search-checkin').value || '';
+    checkout = document.getElementById('search-checkout').value || '';
+    guests = document.getElementById('search-guests').value || '';
+    propertyType = document.getElementById('search-property').value || '';
+    budget = document.getElementById('search-budget').value.trim();
+    category = 'travel';
+  }} else {{
+    category = document.getElementById('search-category').value.trim();
+    budget = document.getElementById('search-budget-generic').value.trim();
+  }}
 
   setLoading('go-search', true);
 
@@ -1007,7 +1097,7 @@ async function handleSearch() {{
     const resp = await fetch('/intent/search', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ query, category, budget }})
+      body: JSON.stringify({{ query, category, budget, checkin, checkout, guests, property_type: propertyType }})
     }});
     const data = await resp.json();
 

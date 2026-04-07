@@ -106,6 +106,14 @@ pub struct SearchRequest {
     pub category: String,
     #[serde(default)]
     pub budget: String,
+    #[serde(default)]
+    pub checkin: String,
+    #[serde(default)]
+    pub checkout: String,
+    #[serde(default)]
+    pub guests: String,
+    #[serde(default)]
+    pub property_type: String,
 }
 
 /// POST /intent/search — User typed a natural language search.
@@ -125,23 +133,58 @@ pub async fn intent_search(
     }
 
     let category = request.category.trim().to_lowercase();
-    let is_travel = category.is_empty()
-        || category.contains("travel")
-        || category.contains("hotel")
-        || category.contains("stay")
-        || category.contains("airbnb")
-        || category.contains("accommodation")
-        || looks_like_travel(&query);
+    let checkin = request.checkin.trim().to_string();
+    let checkout = request.checkout.trim().to_string();
+    let guests = request.guests.trim().to_string();
+    let property_type = request.property_type.trim().to_string();
+
+    let is_travel = category.contains("travel")
+        || category.is_empty() && looks_like_travel(&query);
 
     let encoded = query.replace(' ', "+");
 
     let platform_links: Vec<serde_json::Value> = if is_travel {
+        // Build Airbnb URL with filters
+        let mut airbnb_url = format!("https://www.airbnb.com/s/{}/homes", encoded);
+        let mut airbnb_params = Vec::new();
+        if !checkin.is_empty() { airbnb_params.push(format!("checkin={}", checkin)); }
+        if !checkout.is_empty() { airbnb_params.push(format!("checkout={}", checkout)); }
+        if !guests.is_empty() { airbnb_params.push(format!("adults={}", guests)); }
+        if property_type == "entire_home" { airbnb_params.push("room_types[]=Entire+home/apt".to_string()); }
+        else if property_type == "private_room" { airbnb_params.push("room_types[]=Private+room".to_string()); }
+        else if property_type == "hotel" { airbnb_params.push("room_types[]=Hotel+room".to_string()); }
+        if !airbnb_params.is_empty() { airbnb_url = format!("{}?{}", airbnb_url, airbnb_params.join("&")); }
+
+        // Build Booking.com URL with filters
+        let mut booking_url = format!("https://www.booking.com/searchresults.html?ss={}", encoded);
+        if !checkin.is_empty() { booking_url.push_str(&format!("&checkin={}", checkin)); }
+        if !checkout.is_empty() { booking_url.push_str(&format!("&checkout={}", checkout)); }
+        if !guests.is_empty() { booking_url.push_str(&format!("&group_adults={}", guests)); }
+
+        // Build Expedia URL with filters
+        let mut expedia_url = format!("https://www.expedia.com/Hotel-Search?destination={}", encoded);
+        if !checkin.is_empty() { expedia_url.push_str(&format!("&startDate={}", checkin)); }
+        if !checkout.is_empty() { expedia_url.push_str(&format!("&endDate={}", checkout)); }
+        if !guests.is_empty() { expedia_url.push_str(&format!("&adults={}", guests)); }
+
+        // Build VRBO URL with filters
+        let mut vrbo_url = format!("https://www.vrbo.com/search?destination={}", encoded);
+        if !checkin.is_empty() { vrbo_url.push_str(&format!("&startDate={}", checkin)); }
+        if !checkout.is_empty() { vrbo_url.push_str(&format!("&endDate={}", checkout)); }
+        if !guests.is_empty() { vrbo_url.push_str(&format!("&adults={}", guests)); }
+
+        // Build Hotels.com URL with filters
+        let mut hotels_url = format!("https://www.hotels.com/search.do?q-destination={}", encoded);
+        if !checkin.is_empty() { hotels_url.push_str(&format!("&q-check-in={}", checkin)); }
+        if !checkout.is_empty() { hotels_url.push_str(&format!("&q-check-out={}", checkout)); }
+        if !guests.is_empty() { hotels_url.push_str(&format!("&q-rooms=1&q-room-0-adults={}", guests)); }
+
         vec![
-            json!({ "platform": "Airbnb", "url": format!("https://www.airbnb.com/s/{}/homes", encoded), "icon": "🏠" }),
-            json!({ "platform": "Booking.com", "url": format!("https://www.booking.com/searchresults.html?ss={}", encoded), "icon": "🏨" }),
-            json!({ "platform": "Expedia", "url": format!("https://www.expedia.com/Hotel-Search?destination={}", encoded), "icon": "✈️" }),
-            json!({ "platform": "VRBO", "url": format!("https://www.vrbo.com/search?destination={}", encoded), "icon": "🏡" }),
-            json!({ "platform": "Hotels.com", "url": format!("https://www.hotels.com/search.do?q-destination={}", encoded), "icon": "🛏️" }),
+            json!({ "platform": "Airbnb", "url": airbnb_url, "icon": "🏠" }),
+            json!({ "platform": "Booking.com", "url": booking_url, "icon": "🏨" }),
+            json!({ "platform": "Expedia", "url": expedia_url, "icon": "✈️" }),
+            json!({ "platform": "VRBO", "url": vrbo_url, "icon": "🏡" }),
+            json!({ "platform": "Hotels.com", "url": hotels_url, "icon": "🛏️" }),
             json!({ "platform": "TripAdvisor", "url": format!("https://www.tripadvisor.com/Search?q={}", encoded), "icon": "📍" }),
         ]
     } else {
