@@ -656,8 +656,10 @@ fn build_compare_html(session_id: &str) -> String {
 </head>
 <body>
   <div class="header">
-    <span class="logo">🛡️</span>
-    <span class="brand">NirnAI</span>
+    <a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;">
+      <span class="logo">🛡️</span>
+      <span class="brand">NirnAI</span>
+    </a>
     <span class="tagline">Clear decisions. Every purchase.</span>
   </div>
 
