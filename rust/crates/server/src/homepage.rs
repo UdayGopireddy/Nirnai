@@ -250,6 +250,60 @@ nav {{
   border-color: var(--accent);
 }}
 
+/* ── Autocomplete dropdown ── */
+.ac-wrap {{ position: relative; }}
+.ac-dropdown {{
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  z-index: 50;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-hover);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}}
+.ac-dropdown.open {{ display: block; }}
+.ac-item {{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background 0.12s;
+}}
+.ac-item:hover, .ac-item.active {{
+  background: var(--bg-surface);
+}}
+.ac-icon {{
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 16px;
+  flex-shrink: 0;
+}}
+.ac-text {{ flex: 1; min-width: 0; }}
+.ac-name {{
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+.ac-region {{
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+
 .input-group input::placeholder,
 .input-group textarea::placeholder {{
   color: var(--text-muted);
@@ -744,9 +798,10 @@ footer {{
 
     <!-- Mode 2: Search -->
     <div class="mode-panel" id="panel-search">
-      <div class="input-group">
+      <div class="input-group ac-wrap">
         <label>What are you looking for?</label>
         <input type="text" id="search-input" placeholder="Best 2BR in Tampa under $200/night" autocomplete="off">
+        <div class="ac-dropdown" id="ac-dropdown"></div>
       </div>
 
       <!-- Travel filters — shown when a travel query is detected -->
@@ -958,6 +1013,182 @@ document.getElementById('search-input').addEventListener('input', checkTravelMod
 document.getElementById('search-input').addEventListener('focus', checkTravelMode);
 // Initialize on load
 checkTravelMode();
+
+// ── Destination autocomplete ──
+const destinations = [
+  // US Major Cities
+  {{ name: "New York", region: "New York, United States", icon: "📍", type: "city" }},
+  {{ name: "Manhattan", region: "New York, New York, United States", icon: "📍", type: "neighborhood" }},
+  {{ name: "Brooklyn", region: "New York, New York, United States", icon: "📍", type: "neighborhood" }},
+  {{ name: "Manhattan Beach", region: "California, United States", icon: "📍", type: "city" }},
+  {{ name: "Los Angeles", region: "California, United States", icon: "📍", type: "city" }},
+  {{ name: "Hollywood", region: "Los Angeles, California, United States", icon: "📍", type: "neighborhood" }},
+  {{ name: "Santa Monica", region: "California, United States", icon: "📍", type: "city" }},
+  {{ name: "San Francisco", region: "California, United States", icon: "📍", type: "city" }},
+  {{ name: "San Diego", region: "California, United States", icon: "📍", type: "city" }},
+  {{ name: "Chicago", region: "Illinois, United States", icon: "📍", type: "city" }},
+  {{ name: "Miami", region: "Florida, United States", icon: "📍", type: "city" }},
+  {{ name: "Miami Beach", region: "Florida, United States", icon: "📍", type: "city" }},
+  {{ name: "Tampa", region: "Florida, United States", icon: "📍", type: "city" }},
+  {{ name: "Orlando", region: "Florida, United States", icon: "📍", type: "city" }},
+  {{ name: "Fort Lauderdale", region: "Florida, United States", icon: "📍", type: "city" }},
+  {{ name: "Key West", region: "Florida, United States", icon: "📍", type: "city" }},
+  {{ name: "Seattle", region: "Washington, United States", icon: "📍", type: "city" }},
+  {{ name: "Boston", region: "Massachusetts, United States", icon: "📍", type: "city" }},
+  {{ name: "Austin", region: "Texas, United States", icon: "📍", type: "city" }},
+  {{ name: "Dallas", region: "Texas, United States", icon: "📍", type: "city" }},
+  {{ name: "Houston", region: "Texas, United States", icon: "📍", type: "city" }},
+  {{ name: "San Antonio", region: "Texas, United States", icon: "📍", type: "city" }},
+  {{ name: "Denver", region: "Colorado, United States", icon: "📍", type: "city" }},
+  {{ name: "Nashville", region: "Tennessee, United States", icon: "📍", type: "city" }},
+  {{ name: "Las Vegas", region: "Nevada, United States", icon: "📍", type: "city" }},
+  {{ name: "Atlanta", region: "Georgia, United States", icon: "📍", type: "city" }},
+  {{ name: "Portland", region: "Oregon, United States", icon: "📍", type: "city" }},
+  {{ name: "Phoenix", region: "Arizona, United States", icon: "📍", type: "city" }},
+  {{ name: "Scottsdale", region: "Arizona, United States", icon: "📍", type: "city" }},
+  {{ name: "Sedona", region: "Arizona, United States", icon: "📍", type: "city" }},
+  {{ name: "New Orleans", region: "Louisiana, United States", icon: "📍", type: "city" }},
+  {{ name: "Washington DC", region: "District of Columbia, United States", icon: "📍", type: "city" }},
+  {{ name: "Philadelphia", region: "Pennsylvania, United States", icon: "📍", type: "city" }},
+  {{ name: "Savannah", region: "Georgia, United States", icon: "📍", type: "city" }},
+  {{ name: "Charleston", region: "South Carolina, United States", icon: "📍", type: "city" }},
+  {{ name: "Honolulu", region: "Hawaii, United States", icon: "🏝️", type: "city" }},
+  {{ name: "Maui", region: "Hawaii, United States", icon: "🏝️", type: "island" }},
+  {{ name: "Big Island", region: "Hawaii, United States", icon: "🏝️", type: "island" }},
+  // US Vacation Spots
+  {{ name: "Lake Tahoe", region: "California / Nevada, United States", icon: "🏔️", type: "region" }},
+  {{ name: "Aspen", region: "Colorado, United States", icon: "🏔️", type: "city" }},
+  {{ name: "Park City", region: "Utah, United States", icon: "🏔️", type: "city" }},
+  {{ name: "Myrtle Beach", region: "South Carolina, United States", icon: "🏖️", type: "city" }},
+  {{ name: "Outer Banks", region: "North Carolina, United States", icon: "🏖️", type: "region" }},
+  {{ name: "Cape Cod", region: "Massachusetts, United States", icon: "🏖️", type: "region" }},
+  {{ name: "Napa Valley", region: "California, United States", icon: "🍷", type: "region" }},
+  {{ name: "Joshua Tree", region: "California, United States", icon: "🏜️", type: "region" }},
+  {{ name: "Palm Springs", region: "California, United States", icon: "🌴", type: "city" }},
+  // Europe
+  {{ name: "London", region: "England, United Kingdom", icon: "📍", type: "city" }},
+  {{ name: "Paris", region: "Île-de-France, France", icon: "📍", type: "city" }},
+  {{ name: "Barcelona", region: "Catalonia, Spain", icon: "📍", type: "city" }},
+  {{ name: "Madrid", region: "Spain", icon: "📍", type: "city" }},
+  {{ name: "Rome", region: "Lazio, Italy", icon: "📍", type: "city" }},
+  {{ name: "Florence", region: "Tuscany, Italy", icon: "📍", type: "city" }},
+  {{ name: "Venice", region: "Veneto, Italy", icon: "📍", type: "city" }},
+  {{ name: "Amalfi Coast", region: "Campania, Italy", icon: "🏖️", type: "region" }},
+  {{ name: "Amsterdam", region: "North Holland, Netherlands", icon: "📍", type: "city" }},
+  {{ name: "Berlin", region: "Germany", icon: "📍", type: "city" }},
+  {{ name: "Munich", region: "Bavaria, Germany", icon: "📍", type: "city" }},
+  {{ name: "Prague", region: "Czech Republic", icon: "📍", type: "city" }},
+  {{ name: "Vienna", region: "Austria", icon: "📍", type: "city" }},
+  {{ name: "Lisbon", region: "Portugal", icon: "📍", type: "city" }},
+  {{ name: "Porto", region: "Portugal", icon: "📍", type: "city" }},
+  {{ name: "Dublin", region: "Ireland", icon: "📍", type: "city" }},
+  {{ name: "Edinburgh", region: "Scotland, United Kingdom", icon: "📍", type: "city" }},
+  {{ name: "Santorini", region: "Greece", icon: "🏝️", type: "island" }},
+  {{ name: "Mykonos", region: "Greece", icon: "🏝️", type: "island" }},
+  {{ name: "Athens", region: "Greece", icon: "📍", type: "city" }},
+  {{ name: "Istanbul", region: "Turkey", icon: "📍", type: "city" }},
+  {{ name: "Dubrovnik", region: "Croatia", icon: "📍", type: "city" }},
+  {{ name: "Reykjavik", region: "Iceland", icon: "📍", type: "city" }},
+  {{ name: "Swiss Alps", region: "Switzerland", icon: "🏔️", type: "region" }},
+  {{ name: "Zurich", region: "Switzerland", icon: "📍", type: "city" }},
+  {{ name: "Nice", region: "French Riviera, France", icon: "🏖️", type: "city" }},
+  // Asia & Pacific
+  {{ name: "Tokyo", region: "Japan", icon: "📍", type: "city" }},
+  {{ name: "Kyoto", region: "Japan", icon: "📍", type: "city" }},
+  {{ name: "Osaka", region: "Japan", icon: "📍", type: "city" }},
+  {{ name: "Bangkok", region: "Thailand", icon: "📍", type: "city" }},
+  {{ name: "Phuket", region: "Thailand", icon: "🏝️", type: "island" }},
+  {{ name: "Chiang Mai", region: "Thailand", icon: "📍", type: "city" }},
+  {{ name: "Bali", region: "Indonesia", icon: "🏝️", type: "island" }},
+  {{ name: "Singapore", region: "Singapore", icon: "📍", type: "city" }},
+  {{ name: "Hong Kong", region: "China", icon: "📍", type: "city" }},
+  {{ name: "Seoul", region: "South Korea", icon: "📍", type: "city" }},
+  {{ name: "Dubai", region: "United Arab Emirates", icon: "📍", type: "city" }},
+  {{ name: "Sydney", region: "New South Wales, Australia", icon: "📍", type: "city" }},
+  {{ name: "Melbourne", region: "Victoria, Australia", icon: "📍", type: "city" }},
+  {{ name: "Auckland", region: "New Zealand", icon: "📍", type: "city" }},
+  // Americas
+  {{ name: "Cancun", region: "Quintana Roo, Mexico", icon: "🏖️", type: "city" }},
+  {{ name: "Tulum", region: "Quintana Roo, Mexico", icon: "🏖️", type: "city" }},
+  {{ name: "Mexico City", region: "Mexico", icon: "📍", type: "city" }},
+  {{ name: "Cabo San Lucas", region: "Baja California Sur, Mexico", icon: "🏖️", type: "city" }},
+  {{ name: "Toronto", region: "Ontario, Canada", icon: "📍", type: "city" }},
+  {{ name: "Vancouver", region: "British Columbia, Canada", icon: "📍", type: "city" }},
+  {{ name: "Montreal", region: "Quebec, Canada", icon: "📍", type: "city" }},
+  {{ name: "Banff", region: "Alberta, Canada", icon: "🏔️", type: "region" }},
+  {{ name: "Rio de Janeiro", region: "Brazil", icon: "📍", type: "city" }},
+  {{ name: "Buenos Aires", region: "Argentina", icon: "📍", type: "city" }},
+  {{ name: "Medellín", region: "Colombia", icon: "📍", type: "city" }},
+  {{ name: "San Juan", region: "Puerto Rico", icon: "🏝️", type: "city" }},
+  // Africa
+  {{ name: "Cape Town", region: "South Africa", icon: "📍", type: "city" }},
+  {{ name: "Marrakech", region: "Morocco", icon: "📍", type: "city" }},
+];
+
+const acInput = document.getElementById('search-input');
+const acDropdown = document.getElementById('ac-dropdown');
+let acActive = -1;
+
+function renderSuggestions(q) {{
+  const lower = q.toLowerCase();
+  if (lower.length < 2) {{ acDropdown.classList.remove('open'); return; }}
+
+  const matches = destinations.filter(d =>
+    d.name.toLowerCase().includes(lower) ||
+    d.region.toLowerCase().includes(lower)
+  ).slice(0, 6);
+
+  if (matches.length === 0) {{ acDropdown.classList.remove('open'); return; }}
+
+  acActive = -1;
+  acDropdown.innerHTML = matches.map((d, i) => `
+    <div class="ac-item" data-idx="${{i}}" data-name="${{d.name}}" data-region="${{d.region}}">
+      <div class="ac-icon">${{d.icon}}</div>
+      <div class="ac-text">
+        <div class="ac-name">${{d.name}}</div>
+        <div class="ac-region">${{d.region}}</div>
+      </div>
+    </div>
+  `).join('');
+  acDropdown.classList.add('open');
+}}
+
+acInput.addEventListener('input', () => {{ renderSuggestions(acInput.value); checkTravelMode(); }});
+acInput.addEventListener('focus', () => {{ if (acInput.value.length >= 2) renderSuggestions(acInput.value); }});
+
+acDropdown.addEventListener('click', (e) => {{
+  const item = e.target.closest('.ac-item');
+  if (!item) return;
+  acInput.value = item.dataset.name;
+  acDropdown.classList.remove('open');
+  checkTravelMode();
+}});
+
+acInput.addEventListener('keydown', (e) => {{
+  const items = acDropdown.querySelectorAll('.ac-item');
+  if (!acDropdown.classList.contains('open') || items.length === 0) return;
+
+  if (e.key === 'ArrowDown') {{
+    e.preventDefault();
+    acActive = Math.min(acActive + 1, items.length - 1);
+    items.forEach((it, i) => it.classList.toggle('active', i === acActive));
+  }} else if (e.key === 'ArrowUp') {{
+    e.preventDefault();
+    acActive = Math.max(acActive - 1, 0);
+    items.forEach((it, i) => it.classList.toggle('active', i === acActive));
+  }} else if (e.key === 'Enter' && acActive >= 0) {{
+    e.preventDefault();
+    acInput.value = items[acActive].dataset.name;
+    acDropdown.classList.remove('open');
+    checkTravelMode();
+  }} else if (e.key === 'Escape') {{
+    acDropdown.classList.remove('open');
+  }}
+}});
+
+document.addEventListener('click', (e) => {{
+  if (!e.target.closest('.ac-wrap')) acDropdown.classList.remove('open');
+}});
 
 // ── Toast helper ──
 function showToast(msg) {{
