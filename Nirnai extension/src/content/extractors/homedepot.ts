@@ -71,8 +71,21 @@ export class HomeDepotExtractor implements SiteExtractor {
       const url = linkEl ? new URL(linkEl.href, window.location.origin).href : "";
       if (!url) continue;
 
-      const priceEl = card.querySelector('[data-testid="product-pod-price-value"], .price-format__main-price, [data-price]');
-      const price = priceEl?.textContent?.trim() || "";
+      const priceEl = card.querySelector(
+        '[data-testid="product-pod-price-value"], .price-format__main-price, [data-price], ' +
+        '[data-testid="standard-price"], .price-detailed__main-price, ' +
+        '.price-format__large--strong, .price-format__dollars, ' +
+        '[data-automation-id="standardPrice"], .pod-plp__price span'
+      );
+      let price = priceEl?.textContent?.trim() || "";
+      // If selector-based extraction fails, try data-price attribute
+      if (!price) {
+        const dataPriceEl = card.querySelector('[data-price]');
+        if (dataPriceEl) {
+          const dp = dataPriceEl.getAttribute('data-price');
+          if (dp) price = `$${dp}`;
+        }
+      }
 
       const ratingEl = card.querySelector('[data-testid="product-pod-ratings"] .stars, .stars-reviews-count__stars');
       const rating = ratingEl?.getAttribute("aria-label") || ratingEl?.textContent?.trim() || "";
@@ -143,13 +156,37 @@ export class HomeDepotExtractor implements SiteExtractor {
         '.brand-link',
       ]);
 
-    const price =
+    let price =
       jsonLd?.offers?.price?.toString() ||
       extractText([
         '[data-testid="price-value"]',
         '.price-format__main-price',
         '.price .price-format__large',
+        '[data-testid="standard-price"]',
+        '.price-detailed__main-price',
+        '.price-format__large--strong',
+        '.price-format__dollars',
+        '[data-automation-id="standardPrice"]',
+        '#standard-price',
+        '.buybox__price',
       ]);
+    // Fallback: extract price from any data-price attribute on the page
+    if (!price) {
+      const dataPriceEl = document.querySelector('[data-price]');
+      if (dataPriceEl) {
+        const dp = dataPriceEl.getAttribute('data-price');
+        if (dp) price = `$${dp}`;
+      }
+    }
+    // Fallback: regex scan visible price containers
+    if (!price) {
+      const priceContainers = document.querySelectorAll('.price, .price-format, [class*="price"]');
+      for (const el of priceContainers) {
+        const text = el.textContent?.trim() || "";
+        const match = text.match(/\$[\d,]+\.?\d{0,2}/);
+        if (match) { price = match[0]; break; }
+      }
+    }
 
     const rating =
       jsonLd?.aggregateRating?.ratingValue?.toString() ||

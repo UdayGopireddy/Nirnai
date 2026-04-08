@@ -7,7 +7,11 @@ from typing import Optional
 from openai import AsyncOpenAI
 from models import ProductData, AlternativeSuggestion
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    timeout=15.0,
+    max_retries=1,
+)
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 

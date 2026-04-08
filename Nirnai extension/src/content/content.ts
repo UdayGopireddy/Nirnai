@@ -229,13 +229,32 @@ function showLoadingPanel(): void {
       <span style="font-size:15px;font-weight:800;background:linear-gradient(135deg,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">NirnAI</span>
       <span style="font-size:10px;color:#475569;margin-left:auto;letter-spacing:0.3px;">Clear decisions.</span>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:center;padding:36px 0;">
+    <div id="nirnai-loading-body" style="display:flex;flex-direction:column;align-items:center;padding:28px 18px;">
       <div style="width:32px;height:32px;border:3px solid #1e293b;border-top-color:#818cf8;border-radius:50%;animation:nirnai-spin 0.7s linear infinite;"></div>
-      <p style="margin:14px 0 4px;font-size:13px;font-weight:600;color:#f1f5f9;">Analyzing product...</p>
-      <p style="font-size:11px;color:#475569;animation:nirnai-pulse 1.5s ease-in-out infinite;">Trust · Value · Quality</p>
+      <p id="nirnai-loading-status" style="margin:14px 0 4px;font-size:13px;font-weight:600;color:#f1f5f9;">Analyzing product...</p>
+      <p id="nirnai-loading-sub" style="font-size:11px;color:#475569;animation:nirnai-pulse 1.5s ease-in-out infinite;">Trust · Value · Quality</p>
+      <div style="width:100%;margin-top:16px;height:3px;background:#1e293b;border-radius:2px;overflow:hidden;">
+        <div id="nirnai-loading-bar" style="height:100%;width:10%;background:linear-gradient(90deg,#818cf8,#a78bfa);border-radius:2px;transition:width 1s ease;"></div>
+      </div>
     </div>
   `;
   document.body.appendChild(panel);
+
+  // Animate progress stages to give feedback during the ~15s wait
+  const stages = [
+    { pct: "30%", text: "Scoring trust & value...", delay: 2000 },
+    { pct: "55%", text: "Checking seller reliability...", delay: 5000 },
+    { pct: "75%", text: "Generating AI insights...", delay: 9000 },
+    { pct: "90%", text: "Almost ready...", delay: 14000 },
+  ];
+  for (const s of stages) {
+    setTimeout(() => {
+      const bar = document.getElementById("nirnai-loading-bar");
+      const status = document.getElementById("nirnai-loading-status");
+      if (bar) bar.style.width = s.pct;
+      if (status) status.textContent = s.text;
+    }, s.delay);
+  }
 }
 
 function showResultPanel(analysis: AnalysisResponse): void {
@@ -1548,6 +1567,21 @@ async function runAnalysis(): Promise<void> {
         showResultPanel(cachedAnalysis);
       } else {
         showLoadingPanel();
+        // Auto-dismiss loading panel after 25s if no result arrives
+        setTimeout(() => {
+          if (!cachedAnalysis && document.getElementById(PANEL_ID)) {
+            const panel = document.getElementById(PANEL_ID);
+            if (panel) {
+              const inner = panel.querySelector("div:last-child") as HTMLElement;
+              if (inner) {
+                inner.innerHTML = `
+                  <p style="margin:14px 0 4px;font-size:13px;font-weight:600;color:#f87171;">Analysis timed out</p>
+                  <p style="font-size:11px;color:#94a3b8;margin-top:4px;">Try refreshing the page.</p>
+                `;
+              }
+            }
+          }
+        }, 25_000);
       }
     }
 

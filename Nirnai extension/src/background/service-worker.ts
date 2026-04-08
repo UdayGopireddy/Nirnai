@@ -117,7 +117,7 @@ async function analyzeProduct(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
+  const timeout = setTimeout(() => controller.abort(), 30_000);
 
   let response: Response;
   try {
@@ -750,9 +750,10 @@ function finishCrossSiteCollection(): void {
 
   startCompare(allListings, crossSiteContext)
     .then((result) => {
-      console.log(`NirnAI: /compare/start returned — navigating to ${result.url}`);
-      chrome.tabs.update(session.originTabId, { url: result.url }).catch(() => {
-        chrome.tabs.create({ url: result.url });
+      const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
+      console.log(`NirnAI: /compare/start returned — navigating to ${compareUrl}`);
+      chrome.tabs.update(session.originTabId, { url: compareUrl }).catch(() => {
+        chrome.tabs.create({ url: compareUrl });
       });
     })
     .catch((err) => {
@@ -791,7 +792,8 @@ chrome.runtime.onMessage.addListener(
       )
         .then((result) => {
           // Open the NirnAI compare page in a new tab
-          chrome.tabs.create({ url: result.url });
+          const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
+          chrome.tabs.create({ url: compareUrl });
           sendResponse(null);
         })
         .catch((err) => {

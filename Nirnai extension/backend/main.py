@@ -23,7 +23,7 @@ from typing import List
 from purchase_scoring import calculate_purchase_score
 from health_scoring import calculate_health_score, is_food_product
 from decision_engine import generate_stamp, compute_confidence
-from ai_service import get_ai_summary, get_alternative_suggestion
+from ai_service import get_ai_summary, get_alternative_suggestion, _generate_fallback_summary
 
 app = FastAPI(
     title="NirnAI API",
@@ -63,12 +63,19 @@ async def analyze_product(product: ProductData) -> AnalysisResponse:
     # Compute confidence
     confidence = compute_confidence(product, review_trust, purchase_score)
 
-    # Get AI summary and alternative suggestion in parallel
+    # Get AI summary and alternative suggestion in parallel (with 20s timeout)
     import asyncio
-    summary, suggestion = await asyncio.gather(
-        get_ai_summary(product, purchase_score, health_score, legacy_decision),
-        get_alternative_suggestion(product, purchase_score, health_score, legacy_decision, warnings),
-    )
+    try:
+        summary, suggestion = await asyncio.wait_for(
+            asyncio.gather(
+                get_ai_summary(product, purchase_score, health_score, legacy_decision),
+                get_alternative_suggestion(product, purchase_score, health_score, legacy_decision, warnings),
+            ),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        summary = _generate_fallback_summary(product, purchase_score, health_score, legacy_decision)
+        suggestion = None
 
     return AnalysisResponse(
         purchase_score=purchase_score,

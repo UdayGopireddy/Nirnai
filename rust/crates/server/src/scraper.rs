@@ -66,6 +66,7 @@ fn extract_from_html(html: &str, url: &str, source_site: &str) -> ProductData {
         "airbnb" => extract_airbnb(&doc, html, url, &mut data),
         "booking" => extract_booking(&doc, html, &mut data),
         "amazon" => extract_amazon(&doc, html, &mut data),
+        "homedepot" => extract_homedepot(&doc, &mut data),
         _ => {}
     }
 
@@ -493,6 +494,85 @@ fn extract_amazon(doc: &Html, _html: &str, data: &mut ProductData) {
     }
 }
 
+/// Home Depot-specific extraction.
+fn extract_homedepot(doc: &Html, data: &mut ProductData) {
+    // Title
+    if data.title.is_empty() {
+        if let Ok(sel) = Selector::parse("[data-testid='product-title'], .product-details__badge-title--wrapper h1, .mainTitle, h1.product-title") {
+            if let Some(el) = doc.select(&sel).next() {
+                data.title = el.text().collect::<String>().trim().to_string();
+            }
+        }
+    }
+
+    // Price — Home Depot uses multiple selector patterns
+    if data.price.is_empty() {
+        let selectors = [
+            "[data-testid='price-value']",
+            ".price-format__main-price",
+            ".price .price-format__large",
+            "[data-testid='standard-price']",
+            ".price-detailed__main-price",
+            "#standard-price",
+            ".buybox__price",
+        ];
+        for sel_str in selectors {
+            if let Ok(sel) = Selector::parse(sel_str) {
+                if let Some(el) = doc.select(&sel).next() {
+                    let text = el.text().collect::<String>().trim().to_string();
+                    if !text.is_empty() {
+                        // Clean up price: extract dollar amount
+                        if let Some(re) = Regex::new(r"\$[\d,]+\.?\d*").ok() {
+                            if let Some(m) = re.find(&text) {
+                                data.price = m.as_str().to_string();
+                                break;
+                            }
+                        }
+                        data.price = text;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Rating
+    if data.rating.is_empty() {
+        if let Ok(sel) = Selector::parse("[itemprop='ratingValue'], .ratings-and-reviews__stars--num") {
+            if let Some(el) = doc.select(&sel).next() {
+                data.rating = el.text().collect::<String>().trim().to_string();
+            }
+        }
+    }
+
+    // Review count
+    if data.review_count.is_empty() {
+        if let Ok(sel) = Selector::parse("[itemprop='reviewCount'], .ratings-and-reviews__count") {
+            if let Some(el) = doc.select(&sel).next() {
+                let text = el.text().collect::<String>().trim().replace(['(', ')'], "");
+                data.review_count = text;
+            }
+        }
+    }
+
+    // Brand
+    if data.brand.is_empty() {
+        if let Ok(sel) = Selector::parse(".product-details__brand--link, [data-testid='product-brand'], .brand-link") {
+            if let Some(el) = doc.select(&sel).next() {
+                data.brand = el.text().collect::<String>().trim().to_string();
+            }
+        }
+    }
+
+    // Set seller
+    if data.seller.is_empty() {
+        data.seller = "Home Depot".to_string();
+    }
+    if data.fulfiller.is_empty() {
+        data.fulfiller = "Home Depot".to_string();
+    }
+}
+
 // ── Utility functions ──
 
 fn detect_site(url: &str) -> String {
@@ -503,6 +583,7 @@ fn detect_site(url: &str) -> String {
         ("amazon", "amazon"), ("walmart", "walmart"), ("target.com", "target"),
         ("bestbuy", "bestbuy"), ("ebay", "ebay"), ("costco", "costco"),
         ("etsy", "etsy"), ("wayfair", "wayfair"),
+        ("homedepot", "homedepot"), ("lowes", "lowes"),
     ];
     for (pattern, name) in sites {
         if u.contains(pattern) { return name.to_string(); }
