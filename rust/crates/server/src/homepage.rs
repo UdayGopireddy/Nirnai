@@ -1305,25 +1305,20 @@ async function handleSearch() {{
 
   setLoading('go-search', true);
 
+  // Fetch both inventory results AND platform search links in parallel
+  let invData = null;
+  let guideData = null;
+
   // Step 1: Check inventory for pre-ranked results
   try {{
     const invResp = await fetch('/listings/search?destination=' + encodeURIComponent(query) + '&limit=10');
     if (invResp.ok) {{
-      const invData = await invResp.json();
-      if (invData.listings && invData.listings.length > 0) {{
-        showInventoryResults(invData, query);
-        setLoading('go-search', false);
-        return;
-      }}
+      const d = await invResp.json();
+      if (d.listings && d.listings.length > 0) invData = d;
     }}
-  }} catch (_) {{
-    // Inventory check failed — fall through to live search
-  }}
+  }} catch (_) {{}}
 
-  // Step 2: No inventory results — get platform search links
-  showProcessing('Searching…', query);
-  updateStage('stage-fetch', false);
-
+  // Step 2: Always get platform search links (with filters applied)
   try {{
     const resp = await fetch('/intent/search', {{
       method: 'POST',
@@ -1331,34 +1326,35 @@ async function handleSearch() {{
       body: JSON.stringify({{ query, category, budget, checkin, checkout, guests, property_type: propertyType }})
     }});
     const data = await resp.json();
-
-    if (!resp.ok) throw new Error(data.error || 'Search failed');
-
-    hideProcessing();
-
-    // Handle search guide response (platform links)
-    if (data.result && data.result.type === 'search_guide') {{
-      showSearchGuide(data.result, query);
-      return;
+    if (resp.ok && data.result && data.result.type === 'search_guide') {{
+      guideData = data.result;
     }}
+  }} catch (_) {{}}
 
-    // Legacy: if compare_url is returned, redirect
-    if (data.compare_url) {{
-      updateStage('stage-fetch', true);
-      updateStage('stage-score', true);
-      updateStage('stage-done', true);
-      window.location.href = data.compare_url;
-    }}
-  }} catch (err) {{
-    hideProcessing();
-    showToast(err.message);
-  }} finally {{
-    setLoading('go-search', false);
+  setLoading('go-search', false);
+
+  // Step 3: Render combined results
+  const container = document.getElementById('inventory-results');
+  let html = '';
+
+  if (invData) {{
+    html += buildInventoryHTML(invData, query, checkin, checkout, guests);
+  }}
+
+  if (guideData) {{
+    const hasInv = !!invData;
+    html += buildSearchGuideHTML(guideData, query, hasInv, checkin, checkout, guests);
+  }}
+
+  if (html) {{
+    container.innerHTML = html;
+    container.style.display = 'block';
+  }} else {{
+    showToast('No results found. Try a different search.');
   }}
 }}
 
-function showInventoryResults(data, query) {{
-  const container = document.getElementById('inventory-results');
+function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   const decisionClass = (d) => {{
     const dl = d.toLowerCase();
     if (dl.includes('book') || dl.includes('smart') || dl.includes('buy')) return 'book';
@@ -1366,17 +1362,45 @@ function showInventoryResults(data, query) {{
     return 'think';
   }};
 
+  // Build date/guest suffix for booking links
+  const dateInfo = [];
+  if (checkin) dateInfo.push(checkin);
+  if (checkout) dateInfo.push(checkout);
+  const dateLabel = dateInfo.length === 2 ? `${{checkin}} → ${{checkout}}` : (dateInfo.length === 1 ? dateInfo[0] : '');
+  const guestsLabel = guests ? `${{guests}} guest${{guests > 1 ? 's' : ''}}` : '';
+  const filterSummary = [dateLabel, guestsLabel].filter(Boolean).join(' · ');
+
   let html = `
     <div class="inv-header">
       <h4>🛡️ NirnAI-verified stays in ${{query}}</h4>
       <span class="inv-badge">FROM INVENTORY</span>
     </div>`;
 
+  if (filterSummary) {{
+    html += `<div style="font-size:12px;color:#f59e0b;margin:-4px 0 10px 0;">📅 ${{filterSummary}} — check availability on each listing</div>`;
+  }}
+
   data.listings.forEach(l => {{
-    const bookingLink = l.url
-      ? l.url
-      : `https://www.${{l.platform || 'airbnb'}}.com/s/${{encodeURIComponent(query)}}/homes`;
-    const linkLabel = l.url ? 'Book Now →' : `Search on ${{(l.platform || 'airbnb').charAt(0).toUpperCase() + (l.platform || 'airbnb').slice(1)}} →`;
+    // Append date/guest params to the booking URL so user lands on correct dates
+    let bookingLink = l.url || `https://www.${{l.platform || 'airbnb'}}.com/s/${{encodeURIComponent(query)}}/homes`;
+    if (l.url) {{
+      const sep = l.url.includes('?') ? '&' : '?';
+      const params = [];
+      if (checkin) {{
+        if (l.url.includes('airbnb')) {{ params.push('check_in=' + checkin); }}
+        else if (l.url.includes('booking')) {{ params.push('checkin=' + checkin); }}
+      }}
+      if (checkout) {{
+        if (l.url.includes('airbnb')) {{ params.push('check_out=' + checkout); }}
+        else if (l.url.includes('booking')) {{ params.push('checkout=' + checkout); }}
+      }}
+      if (guests) {{
+        if (l.url.includes('airbnb')) {{ params.push('adults=' + guests); }}
+        else if (l.url.includes('booking')) {{ params.push('group_adults=' + guests); }}
+      }}
+      if (params.length) bookingLink = l.url + sep + params.join('&');
+    }}
+    const linkLabel = l.url ? 'Check Availability →' : `Search on ${{(l.platform || 'airbnb').charAt(0).toUpperCase() + (l.platform || 'airbnb').slice(1)}} →`;
     html += `
       <div class="inv-card">
         <div class="rank">#${{l.rank}}</div>
@@ -1393,27 +1417,26 @@ function showInventoryResults(data, query) {{
   }});
 
   html += `<div class="inv-fresh">${{data.freshness_note}}</div>`;
-  html += `<div class="inv-divider">Want fresher results?</div>`;
-
-  container.innerHTML = html;
-  container.style.display = 'block';
+  return html;
 }}
 
-function showSearchGuide(guide, query) {{
-  const container = document.getElementById('inventory-results');
+function buildSearchGuideHTML(guide, query, hasInventory, checkin, checkout, guests) {{
   const cat = guide.category === 'travel' ? '🏠' : '🛒';
-  const catLabel = guide.category === 'travel' ? 'Travel & Stays' : 'Shopping';
+  const heading = hasInventory
+    ? 'Browse more options on these platforms'
+    : `Search: ${{query}}`;
+  const subtext = hasInventory
+    ? `Check prices and availability${{checkin ? ' for your dates' : ''}} across platforms. Install the <strong style="color:#f59e0b;">NirnAI extension</strong> to get automatic rankings.`
+    : `No NirnAI-verified results for this search yet. Browse any of these platforms with the <strong style="color:#f59e0b;">NirnAI extension</strong> installed — it will automatically extract listings, search across all platforms, and rank the best options for you.`;
 
   let html = `
-    <div style="background:#1e293b; border:1px solid #334155; border-radius:12px; padding:24px; margin-top:12px;">
+    <div style="background:#1e293b; border:1px solid #334155; border-radius:12px; padding:24px; margin-top:${{hasInventory ? '20' : '12'}}px;">
       <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
         <span style="font-size:24px;">${{cat}}</span>
-        <h4 style="color:#f1f5f9; margin:0; font-size:16px;">Search: ${{query}}</h4>
+        <h4 style="color:#f1f5f9; margin:0; font-size:16px;">${{heading}}</h4>
       </div>
       <p style="color:#94a3b8; font-size:13px; margin:4px 0 16px 0;">
-        No NirnAI-verified results for this search yet. Browse any of these platforms with the
-        <strong style="color:#f59e0b;">NirnAI extension</strong> installed — it will automatically
-        extract listings, search across all platforms, and rank the best options for you.
+        ${{subtext}}
       </p>
       <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:10px;">`;
 
@@ -1434,7 +1457,10 @@ function showSearchGuide(guide, query) {{
   }});
 
   html += `
-      </div>
+      </div>`;
+
+  if (!hasInventory) {{
+    html += `
       <div style="margin-top:16px; padding:12px 16px; background:#0c1322; border:1px solid #1e3a5f;
                   border-radius:8px; display:flex; align-items:flex-start; gap:10px;">
         <span style="font-size:18px;">💡</span>
@@ -1448,11 +1474,11 @@ function showSearchGuide(guide, query) {{
              style="color:#f59e0b; text-decoration:underline;">Install NirnAI for Chrome</a>
           to unlock live cross-platform rankings.
         </div>
-      </div>
-    </div>`;
+      </div>`;
+  }}
 
-  container.innerHTML = html;
-  container.style.display = 'block';
+  html += `</div>`;
+  return html;
 }}
 
 // ── MODE 3: Compare URLs ──
