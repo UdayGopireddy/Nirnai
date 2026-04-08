@@ -9,6 +9,76 @@ use crate::compare::{self, NirnaiState};
 use crate::nirnai::ProductData;
 use crate::scraper;
 
+// ── Affiliate / monetization link builder ──
+//
+// Appends affiliate IDs and UTM tracking params to outbound platform URLs.
+// Affiliate IDs are read from env vars so they can be configured per-deployment
+// without code changes:
+//
+//   NIRNAI_AFF_BOOKING    — Booking.com affiliate ID (affiliate program)
+//   NIRNAI_AFF_AMAZON     — Amazon Associates tag (e.g. "nirnai-20")
+//   NIRNAI_AFF_EXPEDIA    — Expedia/CJ affiliate ID
+//   NIRNAI_AFF_HOTELS     — Hotels.com affiliate ID
+//   NIRNAI_AFF_EBAY       — eBay Partner Network campaign ID
+//   NIRNAI_AFF_VRBO       — VRBO affiliate ID
+//   NIRNAI_AFF_TRIPADVISOR — TripAdvisor affiliate ID
+//
+// When an env var is unset, only UTM tracking params are appended so we can
+// still measure click-through attribution via analytics.
+
+pub fn affiliate_url(base: &str, platform: &str) -> String {
+    let sep = if base.contains('?') { "&" } else { "?" };
+    let mut params: Vec<String> = Vec::new();
+
+    // Platform-specific affiliate params
+    let plat = platform.to_lowercase();
+    match plat.as_str() {
+        "booking" | "booking.com" => {
+            if let Ok(aid) = std::env::var("NIRNAI_AFF_BOOKING") {
+                params.push(format!("aid={}", aid));
+            }
+        }
+        "amazon" => {
+            if let Ok(tag) = std::env::var("NIRNAI_AFF_AMAZON") {
+                params.push(format!("tag={}", tag));
+            }
+        }
+        "expedia" => {
+            if let Ok(aff) = std::env::var("NIRNAI_AFF_EXPEDIA") {
+                params.push(format!("affcid={}", aff));
+            }
+        }
+        "hotels" | "hotels.com" => {
+            if let Ok(aff) = std::env::var("NIRNAI_AFF_HOTELS") {
+                params.push(format!("rffrid={}", aff));
+            }
+        }
+        "ebay" => {
+            if let Ok(cid) = std::env::var("NIRNAI_AFF_EBAY") {
+                params.push(format!("campid={}", cid));
+                params.push("toolid=10001&customid=nirnai".to_string());
+            }
+        }
+        "vrbo" => {
+            if let Ok(aff) = std::env::var("NIRNAI_AFF_VRBO") {
+                params.push(format!("affid={}", aff));
+            }
+        }
+        "tripadvisor" => {
+            if let Ok(aff) = std::env::var("NIRNAI_AFF_TRIPADVISOR") {
+                params.push(format!("CampaignId={}", aff));
+            }
+        }
+        _ => {}
+    }
+
+    // UTM tracking for all platforms — always appended so we can measure attribution
+    params.push("utm_source=nirnai".to_string());
+    params.push("utm_medium=referral".to_string());
+
+    format!("{}{}{}", base, sep, params.join("&"))
+}
+
 // ── POST /intent/link ──
 
 #[derive(Debug, Deserialize)]
@@ -180,21 +250,21 @@ pub async fn intent_search(
         if !guests.is_empty() { hotels_url.push_str(&format!("&q-rooms=1&q-room-0-adults={}", guests)); }
 
         vec![
-            json!({ "platform": "Airbnb", "url": airbnb_url, "icon": "🏠" }),
-            json!({ "platform": "Booking.com", "url": booking_url, "icon": "🏨" }),
-            json!({ "platform": "Expedia", "url": expedia_url, "icon": "✈️" }),
-            json!({ "platform": "VRBO", "url": vrbo_url, "icon": "🏡" }),
-            json!({ "platform": "Hotels.com", "url": hotels_url, "icon": "🛏️" }),
-            json!({ "platform": "TripAdvisor", "url": format!("https://www.tripadvisor.com/Search?q={}", encoded), "icon": "📍" }),
+            json!({ "platform": "Airbnb", "url": affiliate_url(&airbnb_url, "airbnb"), "icon": "🏠" }),
+            json!({ "platform": "Booking.com", "url": affiliate_url(&booking_url, "booking"), "icon": "🏨" }),
+            json!({ "platform": "Expedia", "url": affiliate_url(&expedia_url, "expedia"), "icon": "✈️" }),
+            json!({ "platform": "VRBO", "url": affiliate_url(&vrbo_url, "vrbo"), "icon": "🏡" }),
+            json!({ "platform": "Hotels.com", "url": affiliate_url(&hotels_url, "hotels"), "icon": "🛏️" }),
+            json!({ "platform": "TripAdvisor", "url": affiliate_url(&format!("https://www.tripadvisor.com/Search?q={}", encoded), "tripadvisor"), "icon": "📍" }),
         ]
     } else {
         vec![
-            json!({ "platform": "Amazon", "url": format!("https://www.amazon.com/s?k={}", encoded), "icon": "📦" }),
-            json!({ "platform": "Walmart", "url": format!("https://www.walmart.com/search?q={}", encoded), "icon": "🛒" }),
-            json!({ "platform": "Target", "url": format!("https://www.target.com/s?searchTerm={}", encoded), "icon": "🎯" }),
-            json!({ "platform": "Best Buy", "url": format!("https://www.bestbuy.com/site/searchpage.jsp?st={}", encoded), "icon": "💻" }),
-            json!({ "platform": "eBay", "url": format!("https://www.ebay.com/sch/i.html?_nkw={}", encoded), "icon": "🏷️" }),
-            json!({ "platform": "Costco", "url": format!("https://www.costco.com/CatalogSearch?keyword={}", encoded), "icon": "📋" }),
+            json!({ "platform": "Amazon", "url": affiliate_url(&format!("https://www.amazon.com/s?k={}", encoded), "amazon"), "icon": "📦" }),
+            json!({ "platform": "Walmart", "url": affiliate_url(&format!("https://www.walmart.com/search?q={}", encoded), "walmart"), "icon": "🛒" }),
+            json!({ "platform": "Target", "url": affiliate_url(&format!("https://www.target.com/s?searchTerm={}", encoded), "target"), "icon": "🎯" }),
+            json!({ "platform": "Best Buy", "url": affiliate_url(&format!("https://www.bestbuy.com/site/searchpage.jsp?st={}", encoded), "bestbuy"), "icon": "💻" }),
+            json!({ "platform": "eBay", "url": affiliate_url(&format!("https://www.ebay.com/sch/i.html?_nkw={}", encoded), "ebay"), "icon": "🏷️" }),
+            json!({ "platform": "Costco", "url": affiliate_url(&format!("https://www.costco.com/CatalogSearch?keyword={}", encoded), "costco"), "icon": "📋" }),
         ]
     };
 
@@ -218,16 +288,30 @@ pub async fn intent_search(
 /// Heuristic to detect travel-related search queries.
 fn looks_like_travel(query: &str) -> bool {
     let q = query.to_lowercase();
+
+    // Explicit shopping signals override travel — prevents false positives
+    let shopping_signals = [
+        "phone", "laptop", "tv ", "headphone", "camera", "tablet", "monitor",
+        "keyboard", "mouse", "shoes", "sneakers", "dress", "jacket", "jeans",
+        "shirt", "watch", "ring", "necklace", "sofa", "couch", "mattress",
+        "desk", "chair", "table", "lamp", "refrigerator", "dishwasher",
+        "microwave", "blender", "vacuum", "washer", "dryer", "stroller",
+        "car seat", "toy", "game", "console", "playstation", "xbox",
+        "nintendo", "best buy", "amazon", "walmart", "target", "costco", "ebay",
+    ];
+    if shopping_signals.iter().any(|s| q.contains(s)) {
+        return false;
+    }
+
     let travel_signals = [
         "hotel", "stay", "airbnb", "booking", "resort", "hostel",
-        "apartment", "villa", "cabin", "cottage", "br ", "1br", "2br", "3br",
-        "bedroom", "night", "/night", "per night", "guest", "guests",
-        "check-in", "checkout", "check in", "check out",
+        "villa", "cabin", "cottage", "per night", "/night",
+        "guest house", "check-in", "checkout", "check in", "check out",
+        "vacation rental", "bed and breakfast", "b&b",
     ];
-    // Also treat bare city/location names as travel by default
     let city_signals = [
-        "new york", "newyork", "nyc", "tampa", "miami", "los angeles", "la ",
-        "chicago", "seattle", "boston", "san francisco", "sf ", "austin",
+        "new york", "newyork", "nyc", "tampa", "miami", "los angeles",
+        "chicago", "seattle", "boston", "san francisco", "austin",
         "denver", "nashville", "orlando", "vegas", "las vegas", "atlanta",
         "portland", "dallas", "houston", "phoenix", "san diego",
         "london", "paris", "tokyo", "barcelona", "rome", "dubai",

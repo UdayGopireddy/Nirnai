@@ -698,6 +698,38 @@ fn build_compare_html(session_id: &str) -> String {
       return "var(--red)";
     }}
 
+    // Affiliate / monetization: append tracking + affiliate params to outbound URLs
+    // so NirnAI gets conversion credit when users click through to platforms.
+    const NIRNAI_AFF = {{
+      'booking':     '{booking_aff}',
+      'amazon':      '{amazon_aff}',
+      'expedia':     '{expedia_aff}',
+      'hotels.com':  '{hotels_aff}',
+      'ebay':        '{ebay_aff}',
+      'vrbo':        '{vrbo_aff}',
+      'tripadvisor': '{tripadvisor_aff}',
+    }};
+    function affiliateUrl(url) {{
+      try {{
+        const u = new URL(url);
+        const h = u.hostname.toLowerCase();
+        if (h.includes('booking') && NIRNAI_AFF.booking)     u.searchParams.set('aid', NIRNAI_AFF.booking);
+        if (h.includes('amazon') && NIRNAI_AFF.amazon)        u.searchParams.set('tag', NIRNAI_AFF.amazon);
+        if (h.includes('expedia') && NIRNAI_AFF.expedia)      u.searchParams.set('affcid', NIRNAI_AFF.expedia);
+        if (h.includes('hotels.com') && NIRNAI_AFF['hotels.com']) u.searchParams.set('rffrid', NIRNAI_AFF['hotels.com']);
+        if (h.includes('ebay') && NIRNAI_AFF.ebay) {{
+          u.searchParams.set('campid', NIRNAI_AFF.ebay);
+          u.searchParams.set('toolid', '10001');
+          u.searchParams.set('customid', 'nirnai');
+        }}
+        if (h.includes('vrbo') && NIRNAI_AFF.vrbo)            u.searchParams.set('affid', NIRNAI_AFF.vrbo);
+        if (h.includes('tripadvisor') && NIRNAI_AFF.tripadvisor) u.searchParams.set('CampaignId', NIRNAI_AFF.tripadvisor);
+        u.searchParams.set('utm_source', 'nirnai');
+        u.searchParams.set('utm_medium', 'referral');
+        return u.toString();
+      }} catch {{ return url; }}
+    }}
+
     function parsePriceNum(s) {{
       if (!s) return null;
       const m = s.replace(/,/g, "").match(/([\d.]+)/);
@@ -869,7 +901,7 @@ fn build_compare_html(session_id: &str) -> String {
 
       // CTA
       html += `<div class="hero-cta-row">
-        <a class="btn btn-primary" href="${{top.url}}" target="_blank" rel="noopener">${{ctaText(top, savings)}}</a>
+        <a class="btn btn-primary" href="${{affiliateUrl(top.url)}}" target="_blank" rel="noopener">${{ctaText(top, savings)}}</a>
       </div>`;
 
       html += `</div></div>`; // hero-body, hero
@@ -888,7 +920,7 @@ fn build_compare_html(session_id: &str) -> String {
           html += `<div class="runner-rank">${{listing.rank}}</div>`;
           if (listing.image_url) html += `<img class="runner-image" src="${{listing.image_url}}" alt="" loading="lazy">`;
           html += `<div class="runner-info">`;
-          html += `<div class="runner-title"><a href="${{listing.url}}" target="_blank" rel="noopener">${{listing.title}}</a></div>`;
+          html += `<div class="runner-title"><a href="${{affiliateUrl(listing.url)}}" target="_blank" rel="noopener">${{listing.title}}</a></div>`;
           html += `<div class="runner-meta">`;
           html += stampBadge(listing.stamp?.stamp, listing.stamp?.label);
           html += platformBadge(listing.url);
@@ -896,7 +928,7 @@ fn build_compare_html(session_id: &str) -> String {
           html += `</div>`;
           if (listing.why_ranked) html += `<div class="runner-reason">${{listing.why_ranked}}</div>`;
           html += `</div>`; // runner-info
-          html += `<div class="runner-cta"><a href="${{listing.url}}" target="_blank" rel="noopener">View →</a></div>`;
+          html += `<div class="runner-cta"><a href="${{affiliateUrl(listing.url)}}" target="_blank" rel="noopener">View →</a></div>`;
           html += `</div>`; // runner-top
 
           // Score strip
@@ -922,7 +954,7 @@ fn build_compare_html(session_id: &str) -> String {
 
       // Mobile sticky CTA
       html += `<div class="mobile-sticky-cta">
-        <a class="btn btn-primary" href="${{top.url}}" target="_blank" rel="noopener">${{ctaText(top, savings)}}</a>
+        <a class="btn btn-primary" href="${{affiliateUrl(top.url)}}" target="_blank" rel="noopener">${{ctaText(top, savings)}}</a>
       </div>`;
 
       html += `<div class="footer">NirnAI <span class="heart">·</span> Clear decisions. Every purchase.</div>`;
@@ -959,7 +991,16 @@ fn build_compare_html(session_id: &str) -> String {
     poll();
   </script>
 </body>
-</html>"##, session_id = session_id)
+</html>"##,
+        session_id = session_id,
+        booking_aff = std::env::var("NIRNAI_AFF_BOOKING").unwrap_or_default(),
+        amazon_aff = std::env::var("NIRNAI_AFF_AMAZON").unwrap_or_default(),
+        expedia_aff = std::env::var("NIRNAI_AFF_EXPEDIA").unwrap_or_default(),
+        hotels_aff = std::env::var("NIRNAI_AFF_HOTELS").unwrap_or_default(),
+        ebay_aff = std::env::var("NIRNAI_AFF_EBAY").unwrap_or_default(),
+        vrbo_aff = std::env::var("NIRNAI_AFF_VRBO").unwrap_or_default(),
+        tripadvisor_aff = std::env::var("NIRNAI_AFF_TRIPADVISOR").unwrap_or_default(),
+    )
 }
 
 // ── Inventory-aware wrapper for /analyze ──

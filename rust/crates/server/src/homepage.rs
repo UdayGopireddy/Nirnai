@@ -800,7 +800,7 @@ footer {{
     <div class="mode-panel" id="panel-search">
       <div class="input-group ac-wrap">
         <label>What are you looking for?</label>
-        <input type="text" id="search-input" placeholder="Best 2BR in Tampa under $200/night" autocomplete="off">
+        <input type="text" id="search-input" placeholder="Hotels in Miami, noise-cancelling headphones, running shoes…" autocomplete="off">
         <div class="ac-dropdown" id="ac-dropdown"></div>
       </div>
 
@@ -852,14 +852,44 @@ footer {{
       </div>
 
       <!-- Category row — shown for non-travel queries -->
-      <div id="generic-filters" class="input-row">
-        <div class="input-group">
-          <label>Category</label>
-          <input type="text" id="search-category" placeholder="Travel, Electronics…">
+      <div id="generic-filters" style="display:grid;">
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0 6px;">
+          <span style="font-size:14px;">🛒</span>
+          <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Shopping Filters</span>
+          <span style="font-size:10px;color:#475569;margin-left:auto;">optional — narrow your results</span>
         </div>
-        <div class="input-group">
-          <label>Budget</label>
-          <input type="text" id="search-budget-generic" placeholder="$100–$300">
+        <div class="input-row" style="grid-template-columns:1fr 1fr 1fr;">
+          <div class="input-group">
+            <label>Category</label>
+            <select id="search-category" style="width:100%;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:10px;color:var(--text-primary);font-size:14px;appearance:auto;">
+              <option value="">Any category</option>
+              <option value="Electronics">Electronics</option>
+              <option value="Home & Kitchen">Home & Kitchen</option>
+              <option value="Fashion">Fashion & Clothing</option>
+              <option value="Sports">Sports & Outdoors</option>
+              <option value="Beauty">Beauty & Personal Care</option>
+              <option value="Toys">Toys & Games</option>
+              <option value="Automotive">Automotive</option>
+              <option value="Health">Health & Wellness</option>
+              <option value="Grocery">Grocery & Gourmet</option>
+              <option value="Baby">Baby & Kids</option>
+              <option value="Office">Office Supplies</option>
+              <option value="Tools">Tools & Home Improvement</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Condition</label>
+            <select id="search-condition" style="width:100%;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:10px;color:var(--text-primary);font-size:14px;appearance:auto;">
+              <option value="">Any condition</option>
+              <option value="new">New</option>
+              <option value="refurbished">Refurbished</option>
+              <option value="used">Used</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Budget</label>
+            <input type="text" id="search-budget-generic" placeholder="$50–$500">
+          </div>
         </div>
       </div>
       <button class="go-btn" id="go-search" onclick="handleSearch()">
@@ -874,7 +904,7 @@ footer {{
     <div class="mode-panel" id="panel-compare">
       <div class="input-group">
         <label>Paste listing URLs (one per line)</label>
-        <textarea id="compare-input" placeholder="https://airbnb.com/rooms/123&#10;https://booking.com/hotel/xyz&#10;https://vrbo.com/456"></textarea>
+        <textarea id="compare-input" placeholder="https://amazon.com/dp/B09V3KXJPB&#10;https://walmart.com/ip/123456&#10;https://airbnb.com/rooms/456"></textarea>
       </div>
       <button class="go-btn" id="go-compare" onclick="handleCompare()">
         <span class="btn-text">Compare These →</span>
@@ -991,17 +1021,36 @@ document.getElementById('search-input').addEventListener('keydown', e => {{
 }});
 
 // ── Travel detection for search input ──
-const travelWords = ['hotel','stay','airbnb','booking','resort','hostel','apartment','villa',
-  'cabin','cottage','bedroom','night','per night','guest','guests','check-in','checkout',
-  'new york','nyc','tampa','miami','los angeles','chicago','seattle','boston','san francisco',
+const travelWords = ['hotel','stay','airbnb','booking','resort','hostel',
+  'villa','cabin','cottage','per night','/night','guest house','check-in','checkout',
+  'check in','check out','vacation rental','bed and breakfast','b&b'];
+const travelCities = ['new york','nyc','tampa','miami','los angeles','chicago','seattle','boston','san francisco',
   'austin','denver','nashville','orlando','vegas','atlanta','portland','dallas','houston',
   'london','paris','tokyo','barcelona','rome','dubai','bali','cancun','hawaii','maui',
-  'denver','phoenix','san diego','portland'];
+  'phoenix','san diego'];
+const shoppingWords = ['phone','laptop','tv','headphone','camera','tablet','monitor','keyboard','mouse',
+  'shoes','sneakers','dress','jacket','jeans','shirt','watch','ring','necklace',
+  'sofa','couch','mattress','desk','chair','table','lamp','rug',
+  'refrigerator','dishwasher','microwave','blender','vacuum','washer','dryer',
+  'stroller','car seat','toy','game','console','playstation','xbox','nintendo',
+  'best buy','amazon','walmart','target','costco','ebay'];
 let travelMode = false;
 
 function checkTravelMode() {{
   const q = document.getElementById('search-input').value.toLowerCase();
-  const isTravel = travelWords.some(w => q.includes(w)) || q.length === 0;
+  // Empty query — no mode bias, show generic filters
+  if (q.length === 0) {{
+    if (travelMode) {{
+      travelMode = false;
+      document.getElementById('travel-filters').style.display = 'none';
+      document.getElementById('generic-filters').style.display = 'grid';
+    }}
+    return;
+  }}
+  // Explicit shopping signals override travel
+  const isShopping = shoppingWords.some(w => q.includes(w));
+  // Travel = travel keyword or city name (but NOT if shopping word matched first)
+  const isTravel = !isShopping && (travelWords.some(w => q.includes(w)) || travelCities.some(w => q.includes(w)));
   if (isTravel !== travelMode) {{
     travelMode = isTravel;
     document.getElementById('travel-filters').style.display = isTravel ? 'block' : 'none';
@@ -1123,6 +1172,38 @@ const destinations = [
   // Africa
   {{ name: "Cape Town", region: "South Africa", icon: "📍", type: "city" }},
   {{ name: "Marrakech", region: "Morocco", icon: "📍", type: "city" }},
+  // ── Shopping / Product Categories ──
+  {{ name: "Laptops", region: "Electronics · Computers", icon: "💻", type: "product" }},
+  {{ name: "Headphones", region: "Electronics · Audio", icon: "🎧", type: "product" }},
+  {{ name: "TVs", region: "Electronics · Home Entertainment", icon: "📺", type: "product" }},
+  {{ name: "Smartphones", region: "Electronics · Mobile", icon: "📱", type: "product" }},
+  {{ name: "Tablets", region: "Electronics · Mobile", icon: "📱", type: "product" }},
+  {{ name: "Cameras", region: "Electronics · Photography", icon: "📷", type: "product" }},
+  {{ name: "Monitors", region: "Electronics · Displays", icon: "🖥️", type: "product" }},
+  {{ name: "Gaming Consoles", region: "Electronics · Gaming", icon: "🎮", type: "product" }},
+  {{ name: "Smartwatches", region: "Electronics · Wearables", icon: "⌚", type: "product" }},
+  {{ name: "Wireless Earbuds", region: "Electronics · Audio", icon: "🎵", type: "product" }},
+  {{ name: "Running Shoes", region: "Fashion · Athletic", icon: "👟", type: "product" }},
+  {{ name: "Sneakers", region: "Fashion · Footwear", icon: "👟", type: "product" }},
+  {{ name: "Winter Jackets", region: "Fashion · Outerwear", icon: "🧥", type: "product" }},
+  {{ name: "Backpacks", region: "Fashion · Bags", icon: "🎒", type: "product" }},
+  {{ name: "Sunglasses", region: "Fashion · Accessories", icon: "🕶️", type: "product" }},
+  {{ name: "Mattresses", region: "Home · Bedroom", icon: "🛏️", type: "product" }},
+  {{ name: "Coffee Makers", region: "Home · Kitchen Appliances", icon: "☕", type: "product" }},
+  {{ name: "Air Purifiers", region: "Home · Appliances", icon: "🌬️", type: "product" }},
+  {{ name: "Robot Vacuums", region: "Home · Cleaning", icon: "🤖", type: "product" }},
+  {{ name: "Standing Desks", region: "Home · Office Furniture", icon: "🪑", type: "product" }},
+  {{ name: "Office Chairs", region: "Home · Office Furniture", icon: "🪑", type: "product" }},
+  {{ name: "Blenders", region: "Home · Kitchen Appliances", icon: "🥤", type: "product" }},
+  {{ name: "Air Fryers", region: "Home · Kitchen Appliances", icon: "🍳", type: "product" }},
+  {{ name: "Strollers", region: "Baby · Gear", icon: "👶", type: "product" }},
+  {{ name: "Car Seats", region: "Baby · Safety", icon: "👶", type: "product" }},
+  {{ name: "Protein Powder", region: "Health · Supplements", icon: "💪", type: "product" }},
+  {{ name: "Vitamins", region: "Health · Supplements", icon: "💊", type: "product" }},
+  {{ name: "Skincare Sets", region: "Beauty · Skincare", icon: "✨", type: "product" }},
+  {{ name: "Electric Toothbrush", region: "Health · Oral Care", icon: "🪥", type: "product" }},
+  {{ name: "Luggage", region: "Travel · Bags", icon: "🧳", type: "product" }},
+  {{ name: "Power Tools", region: "Tools · Home Improvement", icon: "🔧", type: "product" }},
 ];
 
 const acInput = document.getElementById('search-input');
@@ -1136,17 +1217,17 @@ function renderSuggestions(q) {{
   const matches = destinations.filter(d =>
     d.name.toLowerCase().includes(lower) ||
     d.region.toLowerCase().includes(lower)
-  ).slice(0, 6);
+  ).slice(0, 8);
 
   if (matches.length === 0) {{ acDropdown.classList.remove('open'); return; }}
 
   acActive = -1;
   acDropdown.innerHTML = matches.map((d, i) => `
-    <div class="ac-item" data-idx="${{i}}" data-name="${{d.name}}" data-region="${{d.region}}">
+    <div class="ac-item" data-idx="${{i}}" data-name="${{d.name}}" data-region="${{d.region}}" data-type="${{d.type}}">
       <div class="ac-icon">${{d.icon}}</div>
       <div class="ac-text">
         <div class="ac-name">${{d.name}}</div>
-        <div class="ac-region">${{d.region}}</div>
+        <div class="ac-region">${{d.type === 'product' ? '🛒 ' : '✈️ '}}${{d.region}}</div>
       </div>
     </div>
   `).join('');
@@ -1354,6 +1435,37 @@ async function handleSearch() {{
   }}
 }}
 
+// Affiliate / monetization: append tracking + affiliate params to outbound URLs
+function affiliateUrl(url) {{
+  try {{
+    const u = new URL(url);
+    const h = u.hostname.toLowerCase();
+    const AFF = {{
+      booking:     '{booking_aff}',
+      amazon:      '{amazon_aff}',
+      expedia:     '{expedia_aff}',
+      'hotels.com':'{hotels_aff}',
+      ebay:        '{ebay_aff}',
+      vrbo:        '{vrbo_aff}',
+      tripadvisor: '{tripadvisor_aff}',
+    }};
+    if (h.includes('booking') && AFF.booking)     u.searchParams.set('aid', AFF.booking);
+    if (h.includes('amazon') && AFF.amazon)        u.searchParams.set('tag', AFF.amazon);
+    if (h.includes('expedia') && AFF.expedia)      u.searchParams.set('affcid', AFF.expedia);
+    if (h.includes('hotels.com') && AFF['hotels.com']) u.searchParams.set('rffrid', AFF['hotels.com']);
+    if (h.includes('ebay') && AFF.ebay) {{
+      u.searchParams.set('campid', AFF.ebay);
+      u.searchParams.set('toolid', '10001');
+      u.searchParams.set('customid', 'nirnai');
+    }}
+    if (h.includes('vrbo') && AFF.vrbo)            u.searchParams.set('affid', AFF.vrbo);
+    if (h.includes('tripadvisor') && AFF.tripadvisor) u.searchParams.set('CampaignId', AFF.tripadvisor);
+    u.searchParams.set('utm_source', 'nirnai');
+    u.searchParams.set('utm_medium', 'referral');
+    return u.toString();
+  }} catch {{ return url; }}
+}}
+
 function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   const decisionClass = (d) => {{
     const dl = d.toLowerCase();
@@ -1370,9 +1482,15 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   const guestsLabel = guests ? `${{guests}} guest${{guests > 1 ? 's' : ''}}` : '';
   const filterSummary = [dateLabel, guestsLabel].filter(Boolean).join(' · ');
 
+  // Detect if this is travel or shopping based on listing platforms
+  const isTravelResult = data.listings.some(l => {{
+    const p = (l.platform || '').toLowerCase();
+    return ['airbnb','booking','expedia','vrbo','hotels','tripadvisor'].some(s => p.includes(s));
+  }});
+
   let html = `
     <div class="inv-header">
-      <h4>🛡️ NirnAI-verified stays in ${{query}}</h4>
+      <h4>🛡️ NirnAI-verified ${{isTravelResult ? 'stays in' : 'results for'}} ${{query}}</h4>
       <span class="inv-badge">FROM INVENTORY</span>
     </div>`;
 
@@ -1381,8 +1499,14 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   }}
 
   data.listings.forEach(l => {{
+    // Determine if this listing is from a travel platform
+    const plat = (l.platform || '').toLowerCase();
+    const isTravel = ['airbnb','booking','expedia','vrbo','hotels','tripadvisor'].some(s => plat.includes(s));
+
     // Append date/guest params to the booking URL so user lands on correct dates
-    let bookingLink = l.url || `https://www.${{l.platform || 'airbnb'}}.com/s/${{encodeURIComponent(query)}}/homes`;
+    let bookingLink = l.url || (isTravel
+      ? `https://www.${{l.platform || 'airbnb'}}.com/s/${{encodeURIComponent(query)}}/homes`
+      : `https://www.${{l.platform || 'amazon'}}.com/s?k=${{encodeURIComponent(query)}}`);
     if (l.url) {{
       const sep = l.url.includes('?') ? '&' : '?';
       const params = [];
@@ -1400,7 +1524,15 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
       }}
       if (params.length) bookingLink = l.url + sep + params.join('&');
     }}
-    const linkLabel = l.url ? 'Check Availability →' : `Search on ${{(l.platform || 'airbnb').charAt(0).toUpperCase() + (l.platform || 'airbnb').slice(1)}} →`;
+    bookingLink = affiliateUrl(bookingLink);
+    // Context-aware CTA: travel = "Check Availability", shopping = "View Deal"
+    let linkLabel;
+    if (l.url) {{
+      linkLabel = isTravel ? 'Check Availability →' : 'View Deal →';
+    }} else {{
+      const pName = (l.platform || (isTravel ? 'airbnb' : 'amazon'));
+      linkLabel = `Search on ${{pName.charAt(0).toUpperCase() + pName.slice(1)}} →`;
+    }}
     html += `
       <div class="inv-card">
         <div class="rank">#${{l.rank}}</div>
@@ -1441,8 +1573,9 @@ function buildSearchGuideHTML(guide, query, hasInventory, checkin, checkout, gue
       <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:10px;">`;
 
   guide.platform_links.forEach(link => {{
+    const affLink = affiliateUrl(link.url);
     html += `
-        <a href="${{link.url}}" target="_blank" rel="noopener"
+        <a href="${{affLink}}" target="_blank" rel="noopener"
            style="display:flex; align-items:center; gap:10px; padding:12px 16px;
                   background:#0f172a; border:1px solid #334155; border-radius:8px;
                   color:#e2e8f0; text-decoration:none; transition:all 0.2s;"
@@ -1520,6 +1653,13 @@ async function handleCompare() {{
 }}
 </script>
 </body>
-</html>"##
+</html>"##,
+        booking_aff = std::env::var("NIRNAI_AFF_BOOKING").unwrap_or_default(),
+        amazon_aff = std::env::var("NIRNAI_AFF_AMAZON").unwrap_or_default(),
+        expedia_aff = std::env::var("NIRNAI_AFF_EXPEDIA").unwrap_or_default(),
+        hotels_aff = std::env::var("NIRNAI_AFF_HOTELS").unwrap_or_default(),
+        ebay_aff = std::env::var("NIRNAI_AFF_EBAY").unwrap_or_default(),
+        vrbo_aff = std::env::var("NIRNAI_AFF_VRBO").unwrap_or_default(),
+        tripadvisor_aff = std::env::var("NIRNAI_AFF_TRIPADVISOR").unwrap_or_default(),
     )
 }
