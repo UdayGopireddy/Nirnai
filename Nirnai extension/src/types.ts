@@ -141,6 +141,11 @@ export interface AnalysisResponse {
   suggestion?: AlternativeSuggestion | null;
 }
 
+export interface AiEnhancement {
+  summary: string;
+  suggestion?: AlternativeSuggestion | null;
+}
+
 export type MessageAction =
   | "EXTRACT_PRODUCT_DATA"
   | "ANALYZE_PRODUCT"
@@ -151,7 +156,8 @@ export type MessageAction =
   | "PRODUCT_DATA_EXTRACTED"
   | "CROSS_SITE_COMPARE"
   | "CROSS_SITE_COLLECT"
-  | "CROSS_SITE_LISTINGS";
+  | "CROSS_SITE_LISTINGS"
+  | "ANALYSIS_AI_UPDATE";
 
 // Search parameters extracted from the current page, shared across platforms
 export interface CrossSiteSearchParams {

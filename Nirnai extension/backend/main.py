@@ -18,8 +18,10 @@ from models import (
     CartAnalysisResponse,
     CartItemResult,
     CartSummary,
+    AlternativeSuggestion,
 )
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 from purchase_scoring import calculate_purchase_score
 from health_scoring import calculate_health_score, is_food_product
 from decision_engine import generate_stamp, compute_confidence
@@ -38,6 +40,10 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+
+# Mount WhatsApp bot (additive — no changes to existing routes)
+from whatsapp_bot import router as whatsapp_router
+app.include_router(whatsapp_router)
 
 
 @app.post("/analyze", response_model=AnalysisResponse)
@@ -92,6 +98,80 @@ async def analyze_product(product: ProductData) -> AnalysisResponse:
         summary=summary,
         suggestion=suggestion,
     )
+
+
+class AiEnhancement(BaseModel):
+    summary: str = ""
+    suggestion: Optional[AlternativeSuggestion] = None
+
+
+@app.post("/analyze/fast", response_model=AnalysisResponse)
+async def analyze_product_fast(product: ProductData) -> AnalysisResponse:
+    """Fast scoring — rule-based only, no AI calls. Returns in <500ms."""
+
+    purchase_score, purchase_breakdown, review_trust = calculate_purchase_score(product)
+    health_score, health_breakdown = calculate_health_score(product)
+
+    food = is_food_product(product)
+
+    stamp, legacy_decision, reasons, warnings, positives = generate_stamp(
+        purchase_score=purchase_score,
+        health_score=health_score,
+        is_food=food,
+        purchase_breakdown=purchase_breakdown,
+        health_breakdown=health_breakdown,
+        review_trust=review_trust,
+    )
+
+    confidence = compute_confidence(product, review_trust, purchase_score)
+
+    return AnalysisResponse(
+        purchase_score=purchase_score,
+        health_score=health_score,
+        decision=legacy_decision,
+        stamp=stamp,
+        purchase_breakdown=purchase_breakdown,
+        health_breakdown=health_breakdown,
+        review_trust=review_trust,
+        reasons=reasons,
+        warnings=warnings,
+        positives=positives,
+        confidence=confidence,
+        summary="",
+        suggestion=None,
+    )
+
+
+@app.post("/analyze/ai", response_model=AiEnhancement)
+async def analyze_product_ai(product: ProductData) -> AiEnhancement:
+    """AI enhancement — returns summary + alternative suggestion. Slow (~10-15s)."""
+    import asyncio
+
+    purchase_score, purchase_breakdown, review_trust = calculate_purchase_score(product)
+    health_score, health_breakdown = calculate_health_score(product)
+    food = is_food_product(product)
+    _, legacy_decision, _, warnings, _ = generate_stamp(
+        purchase_score=purchase_score,
+        health_score=health_score,
+        is_food=food,
+        purchase_breakdown=purchase_breakdown,
+        health_breakdown=health_breakdown,
+        review_trust=review_trust,
+    )
+
+    try:
+        summary, suggestion = await asyncio.wait_for(
+            asyncio.gather(
+                get_ai_summary(product, purchase_score, health_score, legacy_decision),
+                get_alternative_suggestion(product, purchase_score, health_score, legacy_decision, warnings),
+            ),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        summary = _generate_fallback_summary(product, purchase_score, health_score, legacy_decision)
+        suggestion = None
+
+    return AiEnhancement(summary=summary or "", suggestion=suggestion)
 
 
 @app.post("/analyze-cart", response_model=CartAnalysisResponse)

@@ -244,7 +244,7 @@ function showLoadingPanel(): void {
   const stages = [
     { pct: "30%", text: "Scoring trust & value...", delay: 2000 },
     { pct: "55%", text: "Checking seller reliability...", delay: 5000 },
-    { pct: "75%", text: "Generating AI insights...", delay: 9000 },
+    { pct: "75%", text: "Generating realtime insights...", delay: 9000 },
     { pct: "90%", text: "Almost ready...", delay: 14000 },
   ];
   for (const s of stages) {
@@ -254,6 +254,64 @@ function showLoadingPanel(): void {
       if (bar) bar.style.width = s.pct;
       if (status) status.textContent = s.text;
     }, s.delay);
+  }
+}
+
+/** Build shareable text from analysis results. */
+function buildShareText(analysis: AnalysisResponse): string {
+  const s = analysis.stamp;
+  const url = window.location.href;
+  let text = `${s.icon} ${s.label} — NirnAI Verdict\n\n`;
+  text += `🛒 Purchase Score: ${analysis.purchase_score}/100\n`;
+  text += `⭐ Review Trust: ${analysis.review_trust.trust_score}/100\n`;
+  if (analysis.health_score > 0) text += `🥗 Health Score: ${analysis.health_score}/100\n`;
+  text += `\n${s.reasons.join(" · ")}\n`;
+  if (analysis.warnings.length > 0) text += `\n⚠ ${analysis.warnings[0]}\n`;
+  if (analysis.summary) text += `\n${analysis.summary}\n`;
+  text += `\n🔗 ${url}\n\nAnalyzed by NirnAI — Send any product link to get a verdict`;
+  return text;
+}
+
+/** Dynamically inject AI summary & suggestion into an existing result panel. */
+function injectAiSections(
+  panel: HTMLElement,
+  summary: string,
+  suggestion: { product_name: string; reason: string; search_url?: string } | null,
+  fullAnalysis: AnalysisResponse | null,
+): void {
+  // Remove existing AI sections if present (idempotent)
+  panel.querySelector("#nirnai-ai-summary")?.remove();
+  panel.querySelector("#nirnai-ai-suggestion")?.remove();
+
+  // Find the footer to insert before it
+  const footer = panel.querySelector("[data-nirnai-footer]");
+  if (!footer) return;
+
+  if (summary) {
+    const summaryDiv = document.createElement("div");
+    summaryDiv.id = "nirnai-ai-summary";
+    summaryDiv.style.cssText = "padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;opacity:0;transition:opacity 0.4s ease;";
+    summaryDiv.innerHTML = `<div style="font-size:9px;font-weight:800;color:#475569;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:6px;">Summary</div><div style="font-size:11px;line-height:1.55;color:#94a3b8;">${summary}</div>`;
+    footer.insertAdjacentElement("beforebegin", summaryDiv);
+    // Fade in
+    requestAnimationFrame(() => { summaryDiv.style.opacity = "1"; });
+  }
+
+  const stampType = fullAnalysis?.stamp?.stamp;
+  if (suggestion && stampType !== "SMART_BUY") {
+    const suggDiv = document.createElement("div");
+    suggDiv.id = "nirnai-ai-suggestion";
+    suggDiv.style.cssText = "padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;opacity:0;transition:opacity 0.4s ease;";
+    suggDiv.innerHTML = `
+      <div style="font-size:9px;font-weight:800;color:#475569;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:8px;">Better Alternative</div>
+      <div style="background:#111827;border-radius:12px;padding:12px 14px;border:1px solid #1e293b;">
+        <div style="font-size:12px;font-weight:700;color:#818cf8;margin-bottom:4px;">${suggestion.product_name}</div>
+        <div style="font-size:10px;line-height:1.45;color:#94a3b8;margin-bottom:10px;">${suggestion.reason}</div>
+        <div id="nirnai-suggestion-rank" data-url="${suggestion.search_url || ""}" data-name="${suggestion.product_name}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
+      </div>
+    `;
+    footer.insertAdjacentElement("beforebegin", suggDiv);
+    requestAnimationFrame(() => { suggDiv.style.opacity = "1"; });
   }
 }
 
@@ -322,9 +380,9 @@ function showResultPanel(analysis: AnalysisResponse): void {
       ${healthSection}
     </div>
     ${positivesHtml || warningsHtml ? `<div style="padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;">${warningsHtml}${positivesHtml}</div>` : ""}
-    ${analysis.summary ? `<div style="padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;"><div style="font-size:9px;font-weight:800;color:#475569;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:6px;">Summary</div><div style="font-size:11px;line-height:1.55;color:#94a3b8;">${analysis.summary}</div></div>` : ""}
+    ${analysis.summary ? `<div id="nirnai-ai-summary" style="padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;"><div style="font-size:9px;font-weight:800;color:#475569;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:6px;">Summary</div><div style="font-size:11px;line-height:1.55;color:#94a3b8;">${analysis.summary}</div></div>` : ""}
     ${analysis.suggestion && stamp.stamp !== "SMART_BUY" ? `
-    <div style="padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;">
+    <div id="nirnai-ai-suggestion" style="padding:0 18px 14px;border-top:1px solid #1e293b;padding-top:12px;">
       <div style="font-size:9px;font-weight:800;color:#475569;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:8px;">Better Alternative</div>
       <div style="background:#111827;border-radius:12px;padding:12px 14px;border:1px solid #1e293b;">
         <div style="font-size:12px;font-weight:700;color:#818cf8;margin-bottom:4px;">${analysis.suggestion.product_name}</div>
@@ -332,7 +390,14 @@ function showResultPanel(analysis: AnalysisResponse): void {
         <div id="nirnai-suggestion-rank" data-url="${analysis.suggestion.search_url}" data-name="${analysis.suggestion.product_name}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
       </div>
     </div>` : ""}
-    <div style="padding:8px 18px;border-top:1px solid #1e293b;text-align:center;">
+    <div style="padding:10px 18px;border-top:1px solid #1e293b;display:flex;align-items:center;gap:8px;">
+      <div id="nirnai-share-whatsapp" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:#fff;background:#25D366;padding:6px 12px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(37,211,102,0.3);flex:1;justify-content:center;" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(37,211,102,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(37,211,102,0.3)'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.125.553 4.12 1.522 5.857L.06 23.5l5.793-1.42A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.82c-1.88 0-3.63-.517-5.13-1.412l-.368-.218-3.81.935.978-3.7-.24-.382A9.81 9.81 0 012.18 12c0-5.422 4.398-9.82 9.82-9.82 5.422 0 9.82 4.398 9.82 9.82 0 5.422-4.398 9.82-9.82 9.82z"/></svg>
+        Share verdict
+      </div>
+      <div id="nirnai-share-copy" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:#94a3b8;background:#1e293b;padding:6px 12px;border-radius:6px;cursor:pointer;transition:transform 0.15s,background 0.15s;" onmouseover="this.style.background='#334155'" onmouseout="this.style.background='#1e293b'">📋 Copy</div>
+    </div>
+    <div data-nirnai-footer style="padding:8px 18px;border-top:1px solid #1e293b;text-align:center;">
       <span style="font-size:9px;color:#334155;letter-spacing:0.3px;">NirnAI · Clear decisions. Every purchase.</span>
     </div>
   `;
@@ -342,6 +407,22 @@ function showResultPanel(analysis: AnalysisResponse): void {
   document.getElementById("nirnai-close")?.addEventListener("click", () => {
     removePanel();
     showCollapsedBadge(analysis);
+  });
+
+  // ── Share on WhatsApp ──
+  document.getElementById("nirnai-share-whatsapp")?.addEventListener("click", () => {
+    const text = buildShareText(analysis);
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener");
+  });
+
+  // ── Copy verdict to clipboard ──
+  document.getElementById("nirnai-share-copy")?.addEventListener("click", () => {
+    const text = buildShareText(analysis);
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById("nirnai-share-copy");
+      if (btn) { btn.textContent = "✓ Copied!"; setTimeout(() => { btn.innerHTML = "📋 Copy"; }, 2000); }
+    });
   });
 
   // "Rank alternatives" button → triggers cross-site comparison across ALL platforms
@@ -1266,6 +1347,18 @@ chrome.runtime.onMessage.addListener(
       }
     }
 
+    if ((message as any).action === "ANALYSIS_AI_UPDATE") {
+      const panel = document.getElementById(PANEL_ID);
+      if (panel) {
+        injectAiSections(
+          panel,
+          (message as any).summary || "",
+          (message as any).suggestion || null,
+          (message as any).analysis || null,
+        );
+      }
+    }
+
     // Cross-site comparison finished (failure case — success navigates directly)
     if ((message as any).action === "CROSS_SITE_DONE") {
       compareInProgress = false;
@@ -1663,6 +1756,16 @@ async function runAnalysis(): Promise<void> {
         if (msg.action === "ANALYSIS_RESULT" && msg.analysis && panelShown && !cachedAnalysis) {
           cachedAnalysis = msg.analysis;
           showResultPanel(msg.analysis);
+        }
+        if (msg.action === "ANALYSIS_AI_UPDATE") {
+          // Update cached analysis with AI data
+          if (cachedAnalysis) {
+            cachedAnalysis = { ...cachedAnalysis, summary: msg.summary || "", suggestion: msg.suggestion || null };
+          }
+          const panel = document.getElementById(PANEL_ID);
+          if (panel) {
+            injectAiSections(panel, msg.summary || "", msg.suggestion || null, msg.analysis || null);
+          }
         }
       }
     );

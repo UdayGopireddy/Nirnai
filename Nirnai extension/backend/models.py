@@ -78,7 +78,7 @@ class AnalysisResponse(BaseModel):
     warnings: list[str]
     positives: list[str]
     confidence: float  # 0.0 - 1.0
-    summary: str
+    summary: str = ""
     suggestion: Optional[AlternativeSuggestion] = None
 
 

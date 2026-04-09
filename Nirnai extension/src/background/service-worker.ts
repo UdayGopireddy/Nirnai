@@ -4,6 +4,7 @@
 import {
   ProductData,
   AnalysisResponse,
+  AiEnhancement,
   CartAnalysisResponse,
   BatchResponse,
   DecisionStamp,
@@ -116,6 +117,92 @@ async function analyzeProduct(
     return cached;
   }
 
+  // ── Phase 1: Fast scoring (rule-based, <500ms) ──
+  const fastController = new AbortController();
+  const fastTimeout = setTimeout(() => fastController.abort(), 10_000);
+
+  let fastAnalysis: AnalysisResponse;
+  try {
+    const fastResponse = await fetch(`${API_BASE_URL}/analyze/fast`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productData),
+      signal: fastController.signal,
+    });
+    clearTimeout(fastTimeout);
+
+    if (!fastResponse.ok) throw new Error(`Fast API error: ${fastResponse.status}`);
+    fastAnalysis = await fastResponse.json();
+  } catch {
+    clearTimeout(fastTimeout);
+    // Fall back to original /analyze endpoint if /analyze/fast fails
+    return analyzeProductLegacy(productData, senderTabId);
+  }
+
+  // Show scores immediately
+  updateBadge(fastAnalysis.stamp);
+  notifyContentScript(fastAnalysis, senderTabId);
+
+  // ── Phase 2: AI enhancement (background, ~10-15s) ──
+  fetchAiEnhancement(productData, fastAnalysis, senderTabId);
+
+  return fastAnalysis;
+}
+
+/** Background AI fetch — merges summary + suggestion into the cached result. */
+async function fetchAiEnhancement(
+  productData: ProductData,
+  baseAnalysis: AnalysisResponse,
+  senderTabId?: number
+): Promise<void> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25_000);
+
+    const response = await fetch(`${API_BASE_URL}/analyze/ai`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(productData),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) return;
+
+    const ai: AiEnhancement = await response.json();
+
+    // Merge AI data into analysis
+    const enhanced: AnalysisResponse = {
+      ...baseAnalysis,
+      summary: ai.summary || baseAnalysis.summary,
+      suggestion: ai.suggestion ?? baseAnalysis.suggestion,
+    };
+
+    // Update cache with full result
+    await setCachedAnalysis(productData.url, enhanced);
+
+    // Push AI update to content script
+    const targetTabId =
+      senderTabId ??
+      (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+    if (targetTabId) {
+      chrome.tabs.sendMessage(targetTabId, {
+        action: "ANALYSIS_AI_UPDATE",
+        summary: ai.summary,
+        suggestion: ai.suggestion,
+        analysis: enhanced,
+      });
+    }
+  } catch {
+    // AI enhancement failed silently — user already has scores
+  }
+}
+
+/** Legacy fallback — single /analyze call (used if /analyze/fast fails). */
+async function analyzeProductLegacy(
+  productData: ProductData,
+  senderTabId?: number
+): Promise<AnalysisResponse> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
 
@@ -137,13 +224,8 @@ async function analyzeProduct(
 
   const analysis: AnalysisResponse = await response.json();
 
-  // Cache the result
   await setCachedAnalysis(productData.url, analysis);
-
-  // Update badge icon
   updateBadge(analysis.stamp);
-
-  // Send result to content script for on-page badge
   notifyContentScript(analysis, senderTabId);
 
   return analysis;
