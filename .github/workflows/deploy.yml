@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'rust/**'
+      - 'Nirnai extension/backend/**'
       - '.github/workflows/deploy.yml'
 
 env:
@@ -14,8 +15,9 @@ env:
   APP_RUNNER_SERVICE_ARN: arn:aws:apprunner:us-east-1:206600846246:service/nirnai-api/a36a8faf22514b46b3951558bb1a85d7
 
 jobs:
-  deploy:
-    name: Build & Deploy
+  deploy-rust:
+    name: Build & Deploy Rust
+    if: contains(toJSON(github.event.commits.*.modified), 'rust/') || contains(toJSON(github.event.commits.*.added), 'rust/')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -38,6 +40,71 @@ jobs:
 
       - name: Build, tag, and push Docker image to ECR
         working-directory: ./rust
+        run: |
+          IMAGE_TAG="${{ github.sha }}"
+          ECR_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}"
+          docker build --platform linux/amd64 -t $ECR_URI:$IMAGE_TAG -t $ECR_URI:latest .
+          docker push $ECR_URI:$IMAGE_TAG
+          docker push $ECR_URI:latest
+
+      - name: Deploy to App Runner
+        run: |
+          aws apprunner start-deployment \
+            --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for deployment
+        run: |
+          echo "Waiting for App Runner deployment..."
+          for i in $(seq 1 30); do
+            STATUS=$(aws apprunner describe-service \
+              --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Service.Status' --output text)
+            echo "Status: $STATUS (attempt $i/30)"
+            if [ "$STATUS" = "RUNNING" ]; then
+              echo "Deployment successful!"
+              exit 0
+            fi
+            if [ "$STATUS" = "CREATE_FAILED" ] || [ "$STATUS" = "DELETE_FAILED" ]; then
+              echo "Deployment failed with status: $STATUS"
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "Timeout waiting for deployment"
+          exit 1
+
+      - name: Verify health
+        run: |
+          curl -sf https://zpct3iakih.us-east-1.awsapprunner.com/health || exit 1
+          echo "Production health check passed"
+
+  deploy-backend:
+    name: Build & Deploy Python Backend
+    if: contains(toJSON(github.event.commits.*.modified), 'Nirnai extension/backend/') || contains(toJSON(github.event.commits.*.added), 'Nirnai extension/backend/')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image to ECR
+        working-directory: ./Nirnai extension/backend
         run: |
           IMAGE_TAG="${{ github.sha }}"
           ECR_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}"
