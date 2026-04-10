@@ -10,6 +10,7 @@ mod homepage;
 mod intent;
 mod inventory;
 mod nirnai;
+mod proxy;
 mod scraper;
 
 #[tokio::main]
@@ -38,6 +39,9 @@ async fn main() {
         .route("/analyze", post(compare::analyze_with_inventory))
         .route("/analyze-cart", post(nirnai::analyze_cart))
         .route("/analyze-batch", post(nirnai::analyze_batch))
+        .route("/analyze/fast", post(proxy::proxy))
+        .route("/analyze/ai", post(proxy::proxy))
+        .route("/whatsapp/webhook", get(proxy::proxy).post(proxy::proxy))
         .route("/compare/start", post(compare::start_compare))
         .route("/compare/{id}", get(compare::compare_page))
         .route("/compare/{id}/status", get(compare::compare_status))

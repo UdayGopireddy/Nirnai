@@ -107,7 +107,7 @@ jobs:
         working-directory: ./Nirnai extension/backend
         run: |
           IMAGE_TAG="${{ github.sha }}"
-          ECR_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}"
+          ECR_URI="${{ steps.login-ecr.outputs.registry }}/nirnai-python"
           docker build --platform linux/amd64 -t $ECR_URI:$IMAGE_TAG -t $ECR_URI:latest .
           docker push $ECR_URI:$IMAGE_TAG
           docker push $ECR_URI:latest
@@ -115,15 +115,16 @@ jobs:
       - name: Deploy to App Runner
         run: |
           aws apprunner start-deployment \
-            --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} \
+            --service-arn arn:aws:apprunner:us-east-1:206600846246:service/nirnai-python/d2260d3154a044d78a4493a731c7ad20 \
             --region ${{ env.AWS_REGION }}
 
       - name: Wait for deployment
         run: |
           echo "Waiting for App Runner deployment..."
+          SERVICE_ARN="arn:aws:apprunner:us-east-1:206600846246:service/nirnai-python/d2260d3154a044d78a4493a731c7ad20"
           for i in $(seq 1 30); do
             STATUS=$(aws apprunner describe-service \
-              --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} \
+              --service-arn $SERVICE_ARN \
               --region ${{ env.AWS_REGION }} \
               --query 'Service.Status' --output text)
             echo "Status: $STATUS (attempt $i/30)"
@@ -142,5 +143,5 @@ jobs:
 
       - name: Verify health
         run: |
-          curl -sf https://zpct3iakih.us-east-1.awsapprunner.com/health || exit 1
-          echo "Production health check passed"
+          curl -sf https://a328im5kw8.us-east-1.awsapprunner.com/health || exit 1
+          echo "Python backend health check passed"
