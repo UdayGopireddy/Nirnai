@@ -1,4 +1,8 @@
-"""Decision engine — generates stamps, reasons, warnings, positives, confidence."""
+"""Decision engine — generates stamps, reasons, warnings, positives, confidence.
+
+Phase 1 upgrade: confidence is now a PRIMARY signal, not an afterthought.
+Risk flags from purchase_scoring are surfaced directly to users.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from models import (
     ReviewTrust,
     DecisionStamp,
 )
+from purchase_scoring import detect_risk_flags
 
 
 def compute_confidence(
@@ -16,27 +21,40 @@ def compute_confidence(
     review_trust: ReviewTrust,
     purchase_score: int,
 ) -> float:
-    """Compute confidence level (0.0 - 1.0) based on data completeness and trust."""
-    score = 0.5
+    """Compute user-facing confidence level (0.0 - 1.0).
 
-    # Review trust strongly influences confidence
-    score += (review_trust.trust_score - 50) * 0.004  # ±0.20
+    This tells the user: "How much should you trust this verdict?"
 
-    # More data fields filled = higher confidence
-    filled = sum(
-        1
-        for v in [
-            product.title, product.price, product.rating,
-            product.reviewCount, product.seller, product.delivery,
-            product.returnPolicy, product.category,
-        ]
-        if v
-    )
-    score += filled * 0.03  # up to +0.24
+    Factors:
+      - Review volume + trust quality (dominant — 40%)
+      - Data completeness (30%)
+      - Score extremity (10%)
+      - Risk flag count (20%)
+    """
+    score = 0.0
 
-    # Extreme scores are more confident
-    if purchase_score > 85 or purchase_score < 30:
-        score += 0.05
+    # ── Review trust (40% of confidence) ──────────────────────────
+    # Trust score 0-100 → 0.0-0.40
+    score += (review_trust.trust_score / 100) * 0.40
+
+    # ── Data completeness (30%) ───────────────────────────────────
+    fields = [
+        product.title, product.price, product.rating,
+        product.reviewCount, product.seller, product.brand,
+        product.delivery, product.returnPolicy, product.category,
+    ]
+    filled = sum(1 for v in fields if v)
+    score += (filled / len(fields)) * 0.30
+
+    # ── Score extremity (10%) ─────────────────────────────────────
+    # Extreme scores (very high or very low) are more definitive
+    distance_from_neutral = abs(purchase_score - 50) / 50  # 0.0-1.0
+    score += distance_from_neutral * 0.10
+
+    # ── Risk penalty (20%) ────────────────────────────────────────
+    risks = detect_risk_flags(product, review_trust)
+    risk_penalty = min(len(risks) * 0.05, 0.20)  # Each risk costs 5%, cap at 20%
+    score += (0.20 - risk_penalty)
 
     return max(0.0, min(1.0, round(score, 2)))
 
@@ -64,9 +82,11 @@ def _build_purchase_reasons(
 
     # Price
     if breakdown.price >= 75:
-        positives.append("Good value")
+        positives.append("Strong value")
+    elif breakdown.price >= 60:
+        positives.append("Fair value")
     elif breakdown.price < 40:
-        warnings.append("Overpriced")
+        warnings.append("Poor value for price")
 
     # Seller
     if breakdown.seller >= 80:
@@ -130,9 +150,12 @@ def generate_stamp(
     purchase_breakdown: PurchaseBreakdown,
     health_breakdown: HealthBreakdown,
     review_trust: ReviewTrust,
+    risk_flags: list[str] | None = None,
 ) -> tuple[DecisionStamp, str, list[str], list[str], list[str]]:
     """
     Generate the decision stamp per decision_stamp_badge_system spec.
+
+    Phase 1 upgrade: risk_flags are surfaced directly in warnings.
 
     Returns: (stamp, legacy_decision, reasons, warnings, positives)
     """
@@ -140,6 +163,10 @@ def generate_stamp(
     purchase_positives, purchase_warnings = _build_purchase_reasons(
         purchase_breakdown, review_trust
     )
+
+    # Add risk flags to warnings (these bypass normal threshold logic)
+    if risk_flags:
+        purchase_warnings = list(risk_flags) + purchase_warnings
 
     health_positives = []
     health_warnings = []
@@ -171,10 +198,10 @@ def generate_stamp(
             stamp_type = "CHECK"
             legacy = "NEUTRAL"
     else:
-        if purchase_score >= 80:
+        if purchase_score >= 75:
             stamp_type = "SMART_BUY"
             legacy = "BUY"
-        elif purchase_score < 50:
+        elif purchase_score < 45:
             stamp_type = "AVOID"
             legacy = "DON'T BUY"
         else:

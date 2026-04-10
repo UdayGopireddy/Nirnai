@@ -1,5 +1,15 @@
 """Purchase scoring engine — evaluates product quality, price, seller trust.
 
+Scoring philosophy:
+  Score = Relative Value + Risk Assessment + Confidence Modulation
+  NOT just sum(weighted signals)
+
+Key principles:
+  1. Price is RELATIVE to category, not absolute
+  2. Confidence modulates the final score toward neutral when data is sparse
+  3. Risk flags (manipulation, fakes, mismatches) surface explicitly
+  4. Brand is a first-class signal, not ignored
+
 Incorporates Review Trust Score per review_data_strategy spec:
 - Rating strength
 - Review volume / confidence
@@ -161,18 +171,212 @@ def score_reviews(product: ProductData, review_trust: ReviewTrust) -> int:
 
 
 def score_price(product: ProductData) -> int:
-    """Score price value (0-100). Without price history, use heuristics."""
-    if not product.price:
-        return 50
+    """Score VALUE — not cheapness.
 
-    # Parse numeric price
-    price_match = re.search(r"[\d,]+\.?\d*", product.price.replace(",", ""))
-    if not price_match:
-        return 50
+    NirnAI's moat: we don't recommend the cheapest option.
+    We recommend the best VALUE — quality you get for what you pay.
 
-    # Without external price data, default to neutral-positive.
-    # The AI analysis will provide better price assessment.
-    return 65
+    A $300 product with 4.8 stars, 10K reviews, and a known brand
+    is BETTER VALUE than a $15 product with 3.2 stars and no brand.
+
+    Value = (quality signals) relative to (price position in category)
+    """
+    price_val = _parse_price(product.price)
+    if price_val is None:
+        return 50  # No price → neutral
+
+    score = 55  # Start neutral
+
+    # ── 1. Discount detection (always positive — getting more for less) ──
+    discount_pct = _detect_discount(product.price)
+    if discount_pct:
+        if discount_pct >= 50:
+            score += 22
+        elif discount_pct >= 30:
+            score += 15
+        elif discount_pct >= 15:
+            score += 8
+        elif discount_pct >= 5:
+            score += 4
+
+    # ── 2. Value ratio: quality signals relative to price tier ────
+    # This is the core judgment: "Is what you GET worth what you PAY?"
+    category = _detect_category(product)
+    price_range = CATEGORY_PRICE_RANGES.get(category, CATEGORY_PRICE_RANGES["default"])
+    mid = price_range["mid"]
+
+    rating = _parse_rating(product)
+    count = _parse_review_count(product)
+    brand = product.brand.strip().lower()
+    has_brand = bool(brand) and any(b in brand for b in KNOWN_BRANDS)
+
+    # Build a quality signal (0-100) from review trust + brand + rating
+    quality = 40  # baseline
+    if rating is not None:
+        if rating >= 4.5:
+            quality += 30
+        elif rating >= 4.0:
+            quality += 20
+        elif rating >= 3.5:
+            quality += 10
+        elif rating < 3.0:
+            quality -= 15
+
+    if count is not None:
+        if count > 5000:
+            quality += 15
+        elif count > 500:
+            quality += 10
+        elif count > 50:
+            quality += 5
+        elif count < 10:
+            quality -= 5
+
+    if has_brand:
+        quality += 10
+
+    quality = max(0, min(100, quality))
+
+    # Price position in category (0.0 = free, 1.0 = mid, 2.0 = 2x mid)
+    price_position = price_val / mid if mid > 0 else 1.0
+
+    # ── The value judgment ────────────────────────────────────────
+    # High quality + any price = good value
+    # Low quality + high price = poor value
+    # High quality + high price = premium but justified
+    # Low quality + low price = cheap but risky
+
+    if quality >= 70:
+        # Strong product — price matters less
+        if price_position <= 0.5:
+            score += 20  # Great quality, great price — exceptional value
+        elif price_position <= 1.0:
+            score += 15  # Great quality, fair price — solid value
+        elif price_position <= 1.5:
+            score += 8   # Great quality, premium price — justified premium
+        elif price_position <= 2.5:
+            score += 3   # Great quality, expensive — still defensible
+        else:
+            score -= 5   # Even great products have a ceiling
+    elif quality >= 50:
+        # Average product — price sensitivity increases
+        if price_position <= 0.5:
+            score += 12  # Decent product, cheap — fair deal
+        elif price_position <= 1.0:
+            score += 5   # Decent product, fair price — expected
+        elif price_position <= 1.5:
+            score -= 3   # Decent product, premium — needs justification
+        else:
+            score -= 12  # Average product at premium price — poor value
+    else:
+        # Weak product — price can't save it
+        if price_position <= 0.3:
+            score += 3   # Very cheap but low quality — buyer beware
+        elif price_position <= 0.7:
+            score -= 3   # Cheap and low quality — not worth it
+        else:
+            score -= 18  # Expensive AND low quality — worst outcome
+
+    return max(0, min(100, score))
+
+
+def _parse_price(price_str: str) -> Optional[float]:
+    """Extract the primary numeric price value from a price string."""
+    if not price_str:
+        return None
+    # Remove currency symbols, commas, whitespace
+    cleaned = re.sub(r"[₹$€£¥,\s]", "", price_str)
+    # Find first number (the current/sale price is typically first)
+    m = re.search(r"(\d+\.?\d*)", cleaned)
+    return float(m.group(1)) if m else None
+
+
+def _detect_discount(price_str: str) -> Optional[float]:
+    """Detect discount percentage from price string patterns.
+
+    Handles: "$24.99 $39.99", "was $39.99", "30% off", "Save 25%"
+    Returns discount as percentage (0-100) or None.
+    """
+    if not price_str:
+        return None
+
+    # Pattern 1: explicit percentage — "30% off", "Save 25%", "-40%"
+    pct_match = re.search(r"(\d+)\s*%\s*(?:off|save|discount)?", price_str, re.IGNORECASE)
+    if not pct_match:
+        pct_match = re.search(r"(?:save|off|discount)\s*(\d+)\s*%", price_str, re.IGNORECASE)
+    if pct_match:
+        return float(pct_match.group(1))
+
+    # Pattern 2: two prices — current and original (e.g. "$24.99 $39.99" or "$24.99 was $39.99")
+    prices = re.findall(r"[\d,]+\.?\d*", re.sub(r"[₹$€£¥,]", "", price_str))
+    if len(prices) >= 2:
+        p1, p2 = float(prices[0]), float(prices[1])
+        if p2 > p1 and p2 > 0:
+            return round((p2 - p1) / p2 * 100, 1)
+
+    return None
+
+
+# ── Category detection + price ranges ─────────────────────────────
+
+# Price tiers in USD (approximate; used for relative scoring, not absolute judgment)
+CATEGORY_PRICE_RANGES = {
+    "electronics":    {"budget": 30,  "mid": 150, "premium": 600},
+    "personal_care":  {"budget": 6,   "mid": 20,  "premium": 50},
+    "beauty":         {"budget": 10,  "mid": 35,  "premium": 80},
+    "food":           {"budget": 5,   "mid": 15,  "premium": 40},
+    "home":           {"budget": 15,  "mid": 60,  "premium": 200},
+    "clothing":       {"budget": 15,  "mid": 50,  "premium": 150},
+    "toys":           {"budget": 10,  "mid": 30,  "premium": 80},
+    "books":          {"budget": 5,   "mid": 15,  "premium": 40},
+    "sports":         {"budget": 15,  "mid": 50,  "premium": 200},
+    "travel":         {"budget": 60,  "mid": 180, "premium": 450},
+    "default":        {"budget": 15,  "mid": 60,  "premium": 250},
+}
+
+_CATEGORY_KEYWORDS = {
+    "electronics": ["laptop", "phone", "headphone", "earbuds", "speaker", "camera", "tablet",
+                     "monitor", "keyboard", "mouse", "charger", "cable", "tv", "television",
+                     "watch", "smartwatch", "console", "gaming", "usb", "bluetooth", "wireless"],
+    "personal_care": ["shampoo", "conditioner", "soap", "toothpaste", "deodorant", "lotion",
+                       "sunscreen", "razor", "body wash", "moisturizer", "face wash", "cream"],
+    "beauty": ["makeup", "lipstick", "foundation", "mascara", "eyeshadow", "perfume",
+                "cologne", "serum", "skincare", "nail", "cosmetic"],
+    "food": ["snack", "cereal", "chocolate", "protein", "vitamin", "supplement",
+             "organic", "granola", "coffee", "tea", "drink", "juice", "water"],
+    "home": ["furniture", "mattress", "pillow", "bedding", "curtain", "rug", "lamp",
+             "shelf", "storage", "organizer", "kitchen", "cookware", "blender"],
+    "clothing": ["shirt", "pants", "jacket", "shoes", "boots", "dress", "jeans",
+                  "sneakers", "socks", "underwear", "hoodie", "coat", "sweater"],
+    "toys": ["toy", "lego", "puzzle", "doll", "action figure", "board game", "plush"],
+    "books": ["book", "novel", "paperback", "hardcover", "kindle", "audiobook"],
+    "sports": ["fitness", "yoga", "dumbbell", "gym", "bicycle", "hiking", "camping",
+                "running", "tennis", "basketball", "football"],
+    "travel": ["airbnb", "hotel", "hostel", "resort", "villa", "cabin", "booking",
+                "accommodation", "rental", "stay"],
+}
+
+
+def _detect_category(product: ProductData) -> str:
+    """Detect product category from available fields."""
+    # Check source_site for travel
+    if product.source_site in ("airbnb", "booking", "vrbo", "hotels", "agoda",
+                                "tripadvisor", "expedia", "googletravel"):
+        return "travel"
+
+    # Check explicit category field
+    cat_lower = product.category.lower()
+    for cat, keywords in _CATEGORY_KEYWORDS.items():
+        if any(kw in cat_lower for kw in keywords):
+            return cat
+
+    # Fall back to title
+    title_lower = product.title.lower()
+    for cat, keywords in _CATEGORY_KEYWORDS.items():
+        if any(kw in title_lower for kw in keywords):
+            return cat
+
+    return "default"
 
 
 def score_seller(product: ProductData) -> int:
@@ -247,19 +451,72 @@ def score_popularity(product: ProductData) -> int:
     return 30
 
 
-def score_specs(product: ProductData) -> int:
-    """Score product specification completeness (0-100)."""
-    filled = sum(
-        1
-        for field in [
-            product.title,
-            product.rating,
-            product.seller,
-            product.category,
-        ]
-        if field
-    )
-    return min(100, filled * 25)
+def score_quality_signals(product: ProductData) -> int:
+    """Score product quality from brand, data richness, and brand-seller consistency.
+
+    Replaces the old score_specs() which just counted filled fields.
+    Now uses brand as a first-class signal + detects brand-seller mismatches.
+    """
+    score = 50  # Neutral baseline
+
+    brand = product.brand.strip().lower()
+    seller = product.seller.strip().lower()
+    title_lower = product.title.lower()
+
+    # ── Brand recognition ─────────────────────────────────────────
+    if brand:
+        # Known major brands — these have reputations to protect
+        if any(b in brand for b in KNOWN_BRANDS):
+            score += 20
+        else:
+            score += 8  # At least they have a brand
+
+        # Brand-seller consistency: brand selling their own product = trustworthy
+        if brand and seller:
+            if brand in seller or seller in brand:
+                score += 10  # Direct brand store
+            elif "official" in seller or "authorized" in seller:
+                score += 8
+            elif any(t in seller for t in ["amazon", "walmart", "target"]):
+                score += 5  # Major retailer
+            # Risk: premium brand sold by unknown seller
+            elif any(b in brand for b in KNOWN_BRANDS):
+                score -= 10  # Possible counterfeit risk
+    else:
+        # No brand info — check if title has any brand signals
+        if any(b in title_lower for b in KNOWN_BRANDS):
+            score += 10
+        else:
+            score -= 5  # Truly brandless — higher risk for some categories
+
+    # ── Data richness ─────────────────────────────────────────────
+    # More info available = more confident assessment (minor signal)
+    data_fields = sum(1 for v in [
+        product.rating, product.reviewCount, product.price,
+        product.seller, product.delivery, product.returnPolicy,
+        product.category, product.brand,
+    ] if v)
+    if data_fields >= 7:
+        score += 5
+    elif data_fields <= 3:
+        score -= 5
+
+    return max(0, min(100, score))
+
+
+# Known brands (lowercase) — major brands with reputation stakes
+KNOWN_BRANDS = [
+    "apple", "samsung", "sony", "lg", "bose", "nike", "adidas", "puma",
+    "microsoft", "google", "amazon basics", "anker", "dell", "hp", "lenovo",
+    "logitech", "philips", "panasonic", "dyson", "kitchenaid", "instant pot",
+    "neutrogena", "dove", "olay", "nivea", "cetaphil", "cerave",
+    "tylenol", "advil", "colgate", "oral-b", "gillette",
+    "nestle", "kraft", "kellogg", "general mills", "quaker",
+    "levi", "ralph lauren", "calvin klein", "tommy hilfiger",
+    "north face", "columbia", "patagonia", "under armour",
+    "nintendo", "playstation", "xbox", "gopro", "canon", "nikon",
+    "bosch", "dewalt", "makita", "stanley", "3m",
+]
 
 
 def score_delivery(product: ProductData) -> int:
@@ -283,11 +540,18 @@ def score_delivery(product: ProductData) -> int:
 
 def calculate_purchase_score(product: ProductData) -> tuple[int, PurchaseBreakdown, ReviewTrust]:
     """
-    Calculate weighted purchase score.
-    Weights from PRD: Reviews 25%, Price 25%, Seller 15%,
-    Return 10%, Popularity 10%, Specs 10%, Delivery 5%
+    Calculate purchase score with confidence modulation.
 
-    Also returns ReviewTrust for use by decision engine.
+    Phase 1 scoring model:
+      raw_score = weighted sum of 7 components
+      final_score = raw_score * confidence + 50 * (1 - confidence)
+
+    When confidence is low (sparse data, suspicious reviews), the score
+    regresses toward 50 (neutral). This prevents "BUY" verdicts on
+    products we know nothing about.
+
+    Weights: Reviews 25%, Price 25%, Seller 15%,
+             Returns 10%, Popularity 10%, Quality 10%, Delivery 5%
     """
     review_trust = compute_review_trust(product)
 
@@ -297,11 +561,11 @@ def calculate_purchase_score(product: ProductData) -> tuple[int, PurchaseBreakdo
         seller=score_seller(product),
         returns=score_returns(product),
         popularity=score_popularity(product),
-        specs=score_specs(product),
+        specs=score_quality_signals(product),  # Renamed: now uses brand + quality
         delivery=score_delivery(product),
     )
 
-    total = (
+    raw_score = int(
         breakdown.reviews * 0.25
         + breakdown.price * 0.25
         + breakdown.seller * 0.15
@@ -311,4 +575,111 @@ def calculate_purchase_score(product: ProductData) -> tuple[int, PurchaseBreakdo
         + breakdown.delivery * 0.05
     )
 
-    return int(total), breakdown, review_trust
+    # ── Confidence modulation ─────────────────────────────────────
+    # Pull score toward neutral (50) when confidence is low.
+    # This prevents high scores on sparse data and low scores on no data.
+    confidence = _compute_data_confidence(product, review_trust)
+    final_score = int(raw_score * confidence + 50 * (1 - confidence))
+
+    return final_score, breakdown, review_trust
+
+
+def _compute_data_confidence(product: ProductData, review_trust: ReviewTrust) -> float:
+    """How much should we trust this score? (0.0 - 1.0)
+
+    This is NOT the user-facing confidence (that's in decision_engine).
+    This is an internal signal that modulates the raw score.
+
+    Low confidence → score pulled toward 50 (we don't know enough to judge).
+    High confidence → raw score stands.
+    """
+    conf = 0.5
+
+    # Review volume is the strongest confidence signal
+    count = _parse_review_count(product)
+    if count is not None:
+        if count > 1000:
+            conf += 0.25
+        elif count > 200:
+            conf += 0.18
+        elif count > 50:
+            conf += 0.10
+        elif count > 10:
+            conf += 0.03
+        else:
+            conf -= 0.05  # Very few reviews — less confident
+
+    # Rating exists
+    rating = _parse_rating(product)
+    if rating is not None:
+        conf += 0.05
+    else:
+        conf -= 0.10
+
+    # Price available
+    if _parse_price(product.price) is not None:
+        conf += 0.05
+    else:
+        conf -= 0.05
+
+    # Seller known
+    if product.seller.strip():
+        conf += 0.05
+
+    # Brand known
+    if product.brand.strip():
+        conf += 0.03
+
+    # Review trust quality (distribution, authenticity)
+    if review_trust.distribution_quality < 30:
+        conf -= 0.08  # Suspicious distribution
+    if review_trust.authenticity < 40:
+        conf -= 0.05
+
+    return max(0.3, min(1.0, conf))  # Floor at 0.3 — never fully ignore the score
+
+
+# ── Risk detection ────────────────────────────────────────────────
+
+def detect_risk_flags(product: ProductData, review_trust: ReviewTrust) -> list[str]:
+    """Detect risk patterns that warrant explicit warnings.
+
+    These go beyond normal scoring — they're red flags that should be
+    surfaced directly to users regardless of the score.
+    """
+    risks: list[str] = []
+    rating = _parse_rating(product)
+    count = _parse_review_count(product)
+    brand = product.brand.strip().lower()
+    seller = product.seller.strip().lower()
+
+    # 1. Review manipulation signals
+    if rating and count:
+        if rating >= 4.8 and count < 50:
+            risks.append("Suspiciously high rating with few reviews")
+        if rating >= 4.95 and count < 200:
+            risks.append("Near-perfect rating — possible fake reviews")
+
+    # 2. Brand-seller mismatch (counterfeit risk)
+    if brand and seller:
+        is_premium = any(b in brand for b in KNOWN_BRANDS)
+        is_known_seller = any(t in seller for t in [
+            "amazon", "walmart", "target", "official", "authorized",
+            brand,  # Seller matches brand
+        ])
+        if is_premium and not is_known_seller:
+            risks.append(f"Premium brand ({product.brand}) sold by unverified seller")
+
+    # 3. Missing critical data
+    if not product.price:
+        risks.append("No price information available")
+    if not rating and not count:
+        risks.append("No reviews or ratings — unverified product")
+    if not seller:
+        risks.append("Unknown seller")
+
+    # 4. Distribution quality
+    if review_trust.distribution_quality < 25:
+        risks.append("Review pattern looks unnatural")
+
+    return risks

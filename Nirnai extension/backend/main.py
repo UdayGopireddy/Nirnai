@@ -22,7 +22,7 @@ from models import (
 )
 from typing import List, Optional
 from pydantic import BaseModel
-from purchase_scoring import calculate_purchase_score
+from purchase_scoring import calculate_purchase_score, detect_risk_flags
 from health_scoring import calculate_health_score, is_food_product
 from decision_engine import generate_stamp, compute_confidence
 from ai_service import get_ai_summary, get_alternative_suggestion, _generate_fallback_summary
@@ -30,7 +30,7 @@ from ai_service import get_ai_summary, get_alternative_suggestion, _generate_fal
 app = FastAPI(
     title="NirnAI API",
     description="Clear decisions. Every purchase. — Product Analysis API",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 # CORS — allow Chrome extension origins
@@ -55,6 +55,7 @@ async def analyze_product(product: ProductData) -> AnalysisResponse:
     health_score, health_breakdown = calculate_health_score(product)
 
     food = is_food_product(product)
+    risk_flags = detect_risk_flags(product, review_trust)
 
     # Generate decision stamp + reasons/warnings/positives
     stamp, legacy_decision, reasons, warnings, positives = generate_stamp(
@@ -64,6 +65,7 @@ async def analyze_product(product: ProductData) -> AnalysisResponse:
         purchase_breakdown=purchase_breakdown,
         health_breakdown=health_breakdown,
         review_trust=review_trust,
+        risk_flags=risk_flags,
     )
 
     # Compute confidence
@@ -113,6 +115,7 @@ async def analyze_product_fast(product: ProductData) -> AnalysisResponse:
     health_score, health_breakdown = calculate_health_score(product)
 
     food = is_food_product(product)
+    risk_flags = detect_risk_flags(product, review_trust)
 
     stamp, legacy_decision, reasons, warnings, positives = generate_stamp(
         purchase_score=purchase_score,
@@ -121,6 +124,7 @@ async def analyze_product_fast(product: ProductData) -> AnalysisResponse:
         purchase_breakdown=purchase_breakdown,
         health_breakdown=health_breakdown,
         review_trust=review_trust,
+        risk_flags=risk_flags,
     )
 
     confidence = compute_confidence(product, review_trust, purchase_score)
@@ -150,6 +154,7 @@ async def analyze_product_ai(product: ProductData) -> AiEnhancement:
     purchase_score, purchase_breakdown, review_trust = calculate_purchase_score(product)
     health_score, health_breakdown = calculate_health_score(product)
     food = is_food_product(product)
+    risk_flags = detect_risk_flags(product, review_trust)
     _, legacy_decision, _, warnings, _ = generate_stamp(
         purchase_score=purchase_score,
         health_score=health_score,
@@ -157,6 +162,7 @@ async def analyze_product_ai(product: ProductData) -> AiEnhancement:
         purchase_breakdown=purchase_breakdown,
         health_breakdown=health_breakdown,
         review_trust=review_trust,
+        risk_flags=risk_flags,
     )
 
     try:
@@ -183,6 +189,7 @@ async def analyze_cart(products: List[ProductData]) -> CartAnalysisResponse:
         purchase_score, purchase_breakdown, review_trust = calculate_purchase_score(product)
         health_score, health_breakdown = calculate_health_score(product)
         food = is_food_product(product)
+        risk_flags = detect_risk_flags(product, review_trust)
         stamp, legacy_decision, reasons, warnings, positives = generate_stamp(
             purchase_score=purchase_score,
             health_score=health_score,
@@ -190,6 +197,7 @@ async def analyze_cart(products: List[ProductData]) -> CartAnalysisResponse:
             purchase_breakdown=purchase_breakdown,
             health_breakdown=health_breakdown,
             review_trust=review_trust,
+            risk_flags=risk_flags,
         )
         suggestion = await get_alternative_suggestion(
             product, purchase_score, health_score, legacy_decision, warnings
@@ -330,7 +338,7 @@ async def extract_health(req: HealthExtractionRequest) -> HealthExtractionRespon
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "NirnAI API", "version": "2.0.0"}
+    return {"status": "ok", "service": "NirnAI API", "version": "3.0.0"}
 
 
 # ── Helpers for /extract-health ──────────────────────────────────────────────
