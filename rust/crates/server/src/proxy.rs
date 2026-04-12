@@ -22,6 +22,16 @@ static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
         .expect("failed to build HTTP client")
 });
 
+/// Get the Python backend base URL.
+pub fn python_url() -> &'static str {
+    &PYTHON_URL
+}
+
+/// Get a reference to the shared HTTP client.
+pub fn http_client() -> &'static Client {
+    &HTTP_CLIENT
+}
+
 /// Generic proxy: forwards the full request to the Python backend at the same path.
 pub async fn proxy(req: Request<Body>) -> impl IntoResponse {
     let method = req.method().clone();

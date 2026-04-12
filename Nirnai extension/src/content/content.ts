@@ -313,6 +313,9 @@ function injectAiSections(
     footer.insertAdjacentElement("beforebegin", suggDiv);
     requestAnimationFrame(() => { suggDiv.style.opacity = "1"; });
   }
+
+  // Attach the click handler for the newly injected rank button
+  attachRankAlternativesHandler();
 }
 
 function showResultPanel(analysis: AnalysisResponse): void {
@@ -399,6 +402,7 @@ function showResultPanel(analysis: AnalysisResponse): void {
     </div>
     <div data-nirnai-footer style="padding:8px 18px;border-top:1px solid #1e293b;text-align:center;">
       <span style="font-size:9px;color:#334155;letter-spacing:0.3px;">NirnAI · Clear decisions. Every purchase.</span>
+      ${new URLSearchParams(window.location.search).get("utm_source") === "nirnai" ? '<div style="font-size:8px;color:#475569;margin-top:4px;">Standalone analysis — scores may differ from ranking page</div>' : ""}
     </div>
   `;
 
@@ -426,15 +430,22 @@ function showResultPanel(analysis: AnalysisResponse): void {
   });
 
   // "Rank alternatives" button → triggers cross-site comparison across ALL platforms
-  // Extracts precise location coords, dates, guests, and filters from the page
-  // Uses adaptive radius (Manhattan 0.5mi vs suburbs 5mi) for geo-bounded search
-  document.getElementById("nirnai-suggestion-rank")?.addEventListener("click", (e) => {
-    const el = e.currentTarget as HTMLElement;
-    const productName = el.dataset.name || "";
+  attachRankAlternativesHandler();
+}
+
+/** Attach click handler to #nirnai-suggestion-rank. Safe to call multiple times — idempotent. */
+function attachRankAlternativesHandler(): void {
+  const el = document.getElementById("nirnai-suggestion-rank");
+  if (!el || (el as any).__nirnaiHandlerAttached) return;
+  (el as any).__nirnaiHandlerAttached = true;
+
+  el.addEventListener("click", (e) => {
+    const btn = e.currentTarget as HTMLElement;
+    const productName = btn.dataset.name || "";
     if (!productName) return;
-    el.innerHTML = `<div style="display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:nirnai-spin 0.7s linear infinite;vertical-align:middle;margin-right:6px;"></div> Searching…`;
-    el.style.cursor = "default";
-    el.style.opacity = "0.6";
+    btn.innerHTML = `<div style="display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:nirnai-spin 0.7s linear infinite;vertical-align:middle;margin-right:6px;"></div> Searching…`;
+    btn.style.cursor = "default";
+    btn.style.opacity = "0.6";
 
     // Show fullscreen NirnAI overlay — user sees this instead of background tabs
     showCrossSiteOverlay();
@@ -1004,14 +1015,15 @@ async function crossSiteCollect(ext: SiteExtractor): Promise<void> {
   console.log(`NirnAI [collect] START on ${site} — ${window.location.href}`);
 
   // Poll for search page readiness: wait until extractable DOM elements appear
-  // or we hit a time limit. Generous budget (10s) because off-screen tabs
-  // may render more slowly than foreground ones.
+  // or we hit a time limit. Budget: 18s to handle heavy SPAs (Booking, Expedia)
+  // that render slowly in off-screen windows.
   const pollStart = Date.now();
-  const POLL_LIMIT_MS = 10_000;
-  const POLL_INTERVAL_MS = 800;
+  const POLL_LIMIT_MS = 18_000;
+  const POLL_INTERVAL_MS = 1000;
 
   let hasListings = false;
   let pollCount = 0;
+  let isSearchDetected = false;
   while (Date.now() - pollStart < POLL_LIMIT_MS) {
     pollCount++;
     // Try a quick extraction — if we get any listings, DOM is ready
@@ -1023,20 +1035,21 @@ async function crossSiteCollect(ext: SiteExtractor): Promise<void> {
     }
     // Also check isSearchPage as a signal the page loaded
     const isSearch = ext.isSearchPage?.();
-    if (isSearch) {
+    if (isSearch && !isSearchDetected) {
+      isSearchDetected = true;
       console.log(`NirnAI [collect] ${site}: isSearchPage=true after ${pollCount} polls (${Date.now() - pollStart}ms), waiting for cards…`);
       // Page structure loaded but no listings yet — give SPA time to render cards
-      await new Promise(r => setTimeout(r, 1500));
-      break;
+      // Don't break — keep polling for actual listing cards
+      await new Promise(r => setTimeout(r, 2000));
+      continue;
     }
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
 
-  // If we broke out because isSearchPage was true but no listings yet,
-  // give one more chance for cards to render
+  // If we haven't found listings yet, give one more generous wait for SPAs
   if (!hasListings) {
-    console.log(`NirnAI [collect] ${site}: no listings yet after poll phase (${Date.now() - pollStart}ms), final wait…`);
-    await new Promise(r => setTimeout(r, 2000));
+    console.log(`NirnAI [collect] ${site}: no listings yet after poll phase (${Date.now() - pollStart}ms), isSearchPage=${isSearchDetected}, final wait…`);
+    await new Promise(r => setTimeout(r, 3000));
   }
 
   try {
@@ -1044,6 +1057,12 @@ async function crossSiteCollect(ext: SiteExtractor): Promise<void> {
     // Just grab what's on the page right now
     const listings = ext.extractSearchListings?.(20) || [];
     console.log(`NirnAI [collect] ${site}: FINAL extraction → ${listings.length} listings (total ${Date.now() - pollStart}ms)`);
+    if (listings.length > 0) {
+      console.log(`NirnAI [collect] ${site}: sample listing →`, JSON.stringify({ title: listings[0].title, price: listings[0].price, rating: listings[0].rating }));
+    } else {
+      // Log DOM debug info to help fix extractors
+      console.log(`NirnAI [collect] ${site}: DEBUG — URL=${window.location.href}, links with /hotel/=${document.querySelectorAll('a[href*="/hotel/"]').length}, links with Hotel=${document.querySelectorAll('a[href*="Hotel"]').length}, total <a>=${document.querySelectorAll('a').length}, total <li>=${document.querySelectorAll('li').length}`);
+    }
 
     // Apply geo context (fast — just reads navigator.language)
     const geo = detectGeoContext();
@@ -1122,7 +1141,8 @@ async function autoRankListings(ext: SiteExtractor): Promise<void> {
     });
     if (!res.ok) throw new Error(`API ${res.status}`);
     const result = await res.json();
-    window.location.href = result.url;
+    const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
+    window.location.href = compareUrl;
   } catch (err) {
     console.error("NirnAI: auto-rank failed", err);
     overlay.remove();
@@ -1184,7 +1204,8 @@ function showCompareButton(ext: SiteExtractor): void {
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
       const result = await res.json();
-      window.location.href = result.url;
+      const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
+      window.location.href = compareUrl;
     } catch (err) {
       console.error("NirnAI: compare start failed", err);
       compareInProgress = false;
@@ -1639,17 +1660,40 @@ async function runAnalysis(): Promise<void> {
     const data = applyGeoContext(ext.extractProduct());
 
     // Fire analysis in background
-    chrome.runtime.sendMessage(
-      { action: "ANALYZE_PRODUCT", data } as ExtensionMessage,
-      (analysis: AnalysisResponse | null) => {
-        if (analysis) {
-          cachedAnalysis = analysis;
-          if (panelShown && document.getElementById(PANEL_ID)) {
-            showResultPanel(analysis);
+    function sendForAnalysis(productData: ProductData): void {
+      chrome.runtime.sendMessage(
+        { action: "ANALYZE_PRODUCT", data: productData } as ExtensionMessage,
+        (analysis: AnalysisResponse | null) => {
+          if (analysis) {
+            cachedAnalysis = analysis;
+            if (panelShown && document.getElementById(PANEL_ID)) {
+              showResultPanel(analysis);
+            }
           }
         }
-      }
-    );
+      );
+    }
+    sendForAnalysis(data);
+
+    // ── Price retry: Airbnb/Booking render price widgets asynchronously ──
+    // If initial extraction has no price, poll until it appears, then re-analyze.
+    if (!data.price && ext.isProductPage()) {
+      let priceRetries = 0;
+      const maxPriceRetries = 8;
+      const priceRetryInterval = 1500; // 1.5s between retries (up to 12s total)
+      const pricePoller = setInterval(() => {
+        priceRetries++;
+        const freshData = applyGeoContext(ext.extractProduct());
+        if (freshData.price) {
+          clearInterval(pricePoller);
+          console.log(`NirnAI: Price found on retry #${priceRetries}: ${freshData.price}`);
+          sendForAnalysis(freshData);
+        } else if (priceRetries >= maxPriceRetries) {
+          clearInterval(pricePoller);
+          console.log("NirnAI: Price not found after retries — keeping original analysis");
+        }
+      }, priceRetryInterval);
+    }
 
     function revealAnalysis(): void {
       if (panelShown) return;

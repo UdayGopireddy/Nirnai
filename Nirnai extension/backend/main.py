@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import re
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from models import (
     ProductData,
     AnalysisResponse,
+    DecisionStamp,
     HealthExtractionRequest,
     HealthExtractionResponse,
     NormalizedNutrition,
@@ -19,6 +21,8 @@ from models import (
     CartItemResult,
     CartSummary,
     AlternativeSuggestion,
+    BatchResponse,
+    BatchRankRequest,
 )
 from typing import List, Optional
 from pydantic import BaseModel
@@ -66,6 +70,7 @@ async def analyze_product(product: ProductData) -> AnalysisResponse:
         health_breakdown=health_breakdown,
         review_trust=review_trust,
         risk_flags=risk_flags,
+        product=product,
     )
 
     # Compute confidence
@@ -125,6 +130,7 @@ async def analyze_product_fast(product: ProductData) -> AnalysisResponse:
         health_breakdown=health_breakdown,
         review_trust=review_trust,
         risk_flags=risk_flags,
+        product=product,
     )
 
     confidence = compute_confidence(product, review_trust, purchase_score)
@@ -163,6 +169,7 @@ async def analyze_product_ai(product: ProductData) -> AiEnhancement:
         health_breakdown=health_breakdown,
         review_trust=review_trust,
         risk_flags=risk_flags,
+        product=product,
     )
 
     try:
@@ -198,6 +205,7 @@ async def analyze_cart(products: List[ProductData]) -> CartAnalysisResponse:
             health_breakdown=health_breakdown,
             review_trust=review_trust,
             risk_flags=risk_flags,
+            product=product,
         )
         suggestion = await get_alternative_suggestion(
             product, purchase_score, health_score, legacy_decision, warnings
@@ -311,6 +319,171 @@ async def _generate_cart_summary(
         return response.choices[0].message.content.strip()
     except Exception:
         return ""
+
+
+def _repair_json(raw: str) -> str:
+    """Fix common LLM JSON issues: trailing commas, single quotes, unquoted keys."""
+    import re as _re
+    # Remove trailing commas before } or ]
+    fixed = _re.sub(r',\s*([}\]])', r'\1', raw)
+    return fixed
+
+
+@app.post("/compare/rank", response_model=BatchResponse)
+async def compare_rank(req: BatchRankRequest) -> BatchResponse:
+    """Batch ranking via OpenAI — called by Rust gateway's compare flow."""
+    import json as _json
+    import logging
+    from openai import AsyncOpenAI
+    from ai_service import MODEL as openai_model
+
+    logger = logging.getLogger("compare_rank")
+
+    # Use a dedicated client with longer timeout for batch ranking
+    # (ai_service.client has 15s timeout — too short for ranking 15-20 listings)
+    rank_client = AsyncOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        timeout=150.0,
+        max_retries=1,
+    )
+
+    try:
+        response = await rank_client.chat.completions.create(
+            model=openai_model,
+            messages=[
+                {"role": "system", "content": req.system_prompt},
+                {"role": "user", "content": req.user_prompt},
+            ],
+            max_tokens=16000,
+            temperature=0.3,
+        )
+    except Exception as e:
+        logger.error("OpenAI API call failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e}")
+
+    raw = (response.choices[0].message.content or "").strip()
+    finish_reason = response.choices[0].finish_reason
+
+    if finish_reason == "length":
+        logger.warning("OpenAI response truncated (finish_reason=length), %d chars", len(raw))
+
+    # Strip markdown fences if present
+    if raw.startswith("```json"):
+        raw = raw[7:]
+    if raw.startswith("```"):
+        raw = raw[3:]
+    if raw.endswith("```"):
+        raw = raw[:-3]
+    raw = raw.strip()
+
+    # If truncated, try to repair JSON by closing open structures
+    if finish_reason == "length" and raw:
+        # Find last complete object in the ranked array
+        last_brace = raw.rfind("}")
+        if last_brace > 0:
+            # Try progressively trimming to find valid JSON
+            for end in [len(raw), last_brace + 1]:
+                attempt = _repair_json(raw[:end])
+                # Count open brackets/braces and close them
+                open_brackets = attempt.count("[") - attempt.count("]")
+                open_braces = attempt.count("{") - attempt.count("}")
+                repaired = attempt + "}" * open_braces + "]" * open_brackets + "}"
+                try:
+                    data = _json.loads(repaired)
+                    logger.info("Repaired truncated JSON (trimmed to %d chars)", end)
+                    return BatchResponse(**data)
+                except (ValueError, Exception):
+                    continue
+
+    # First try raw, then try with repair
+    try:
+        data = _json.loads(raw)
+    except _json.JSONDecodeError:
+        repaired = _repair_json(raw)
+        try:
+            data = _json.loads(repaired)
+            logger.info("Repaired malformed JSON (trailing commas etc)")
+        except _json.JSONDecodeError as e:
+            logger.error("JSON parse failed after repair: %s | raw (first 500): %s", e, raw[:500])
+            raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {e}")
+
+    try:
+        batch = BatchResponse(**data)
+    except Exception as e:
+        logger.error("BatchResponse validation failed: %s | keys: %s", e, list(data.keys()) if isinstance(data, dict) else type(data))
+        raise HTTPException(status_code=502, detail=f"Response schema mismatch: {e}")
+
+    # ── Re-score with deterministic Python engine ──
+    # GPT assigns arbitrary purchase_score / review_trust based on rank position.
+    # Replace them with the same rule-based scores used on product pages for consistency.
+    if req.listings:
+        from purchase_scoring import calculate_purchase_score
+        from domain_classifier import classify_domain, ScoringDomain
+
+        # Build lookup by URL (most reliable) and title (fallback)
+        listing_by_url: dict[str, ProductData] = {}
+        listing_by_title: dict[str, ProductData] = {}
+        for listing in req.listings:
+            if listing.url:
+                clean_url = listing.url.split("?")[0].rstrip("/").lower()
+                listing_by_url[clean_url] = listing
+            if listing.title:
+                listing_by_title[listing.title.lower().strip()] = listing
+
+        for item in batch.ranked:
+            # Match ranked item back to original listing data
+            matched: ProductData | None = None
+            if item.url:
+                clean_url = item.url.split("?")[0].rstrip("/").lower()
+                matched = listing_by_url.get(clean_url)
+            if not matched and item.title:
+                matched = listing_by_title.get(item.title.lower().strip())
+            if not matched and item.title:
+                # Fuzzy: check if ranked title is a substring of any listing title
+                for key, val in listing_by_title.items():
+                    if item.title.lower().strip() in key or key in item.title.lower().strip():
+                        matched = val
+                        break
+
+            if matched:
+                score, _breakdown, trust = calculate_purchase_score(matched)
+                item.purchase_score = score
+                item.review_trust = trust
+
+                # Derive decision + stamp from score (same thresholds as decision_engine)
+                domain = classify_domain(
+                    matched.source_site, matched.category, matched.title
+                )
+                buy_thr = 70 if domain == ScoringDomain.HOSPITALITY else 75
+                avoid_thr = 40 if domain == ScoringDomain.HOSPITALITY else 45
+
+                if score >= buy_thr:
+                    item.decision = "BUY"
+                    item.stamp = DecisionStamp(
+                        stamp="SMART_BUY", label="BUY", icon="🟢",
+                        reasons=item.positives[:2] or ["Good value"],
+                        purchase_signal="Good value", health_signal="",
+                    )
+                elif score < avoid_thr:
+                    item.decision = "DON'T BUY"
+                    item.stamp = DecisionStamp(
+                        stamp="AVOID", label="DON'T BUY", icon="🔴",
+                        reasons=item.warnings[:2] or ["Review carefully"],
+                        purchase_signal="Low confidence", health_signal="",
+                    )
+                else:
+                    item.decision = "NEUTRAL"
+                    item.stamp = DecisionStamp(
+                        stamp="CHECK", label="THINK ABOUT IT", icon="🟡",
+                        reasons=(item.warnings[:1] + item.positives[:1]) or ["Mixed signals"],
+                        purchase_signal="Average value", health_signal="",
+                    )
+                logger.info("Re-scored '%s': purchase=%d, trust=%d, decision=%s",
+                            item.title[:40], score, trust.trust_score, item.decision)
+            else:
+                logger.warning("Could not match ranked item to listing: '%s'", item.title[:60])
+
+    return batch
 
 
 @app.post("/extract-health", response_model=HealthExtractionResponse)

@@ -13,6 +13,7 @@ use crate::inventory::{self, Inventory};
 use crate::nirnai::{
     self, BatchResponse, ProductData,
 };
+use crate::proxy;
 
 // ── Session store ──
 
@@ -243,7 +244,7 @@ async fn analyze_batch_internal(
     search_context: String,
 ) -> Result<BatchResponse, String> {
     let is_travel = listings.iter().any(|l| {
-        matches!(l.source_site.as_str(), "airbnb" | "booking" | "expedia" | "vrbo" | "hotels")
+        matches!(l.source_site.as_str(), "airbnb" | "booking" | "expedia" | "vrbo" | "hotels" | "agoda" | "tripadvisor" | "googletravel")
     });
 
     let domain_context = if is_travel {
@@ -271,14 +272,32 @@ async fn analyze_batch_internal(
     );
     let user_prompt = nirnai::format_batch_prompt(&listings, &search_context);
 
-    let result = tokio::task::spawn_blocking(move || {
-        nirnai::run_analysis(system_prompt, user_prompt)
-    })
-    .await
-    .map_err(|e| format!("task error: {e}"))?
-    .map_err(|e| e)?;
+    // Call Python backend for ranking (uses OpenAI) instead of Anthropic directly
+    let python_url = proxy::python_url();
+    let url = format!("{}/compare/rank", python_url);
 
-    let batch: BatchResponse = serde_json::from_value(result)
+    let payload = serde_json::json!({
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "listings": listings,
+    });
+
+    let resp = proxy::http_client()
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(180))
+        .send()
+        .await
+        .map_err(|e| format!("Python ranking request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Python ranking returned {status}: {body}"));
+    }
+
+    let batch: BatchResponse = resp.json().await
         .map_err(|e| format!("response schema mismatch: {e}"))?;
 
     Ok(batch)
@@ -597,6 +616,12 @@ fn build_compare_html(session_id: &str) -> String {
     .platform-airbnb  {{ background: #ff385c15; color: #ff385c; border: 1px solid #ff385c30; }}
     .platform-booking  {{ background: #003b9515; color: #5b8def; border: 1px solid #003b9530; }}
     .platform-expedia  {{ background: #fddb3215; color: #fddb32; border: 1px solid #fddb3230; }}
+    .platform-vrbo     {{ background: #3c5cff15; color: #6b8aff; border: 1px solid #3c5cff30; }}
+    .platform-agoda    {{ background: #5c2d9115; color: #9b70d0; border: 1px solid #5c2d9130; }}
+    .platform-hotels   {{ background: #d4111115; color: #ff5050; border: 1px solid #d4111130; }}
+    .platform-tripadvisor {{ background: #34e0a115; color: #34e0a1; border: 1px solid #34e0a130; }}
+    .platform-googletravel {{ background: #4285f415; color: #4285f4; border: 1px solid #4285f430; }}
+    .platform-default  {{ background: #ffffff10; color: #a0a0a0; border: 1px solid #ffffff20; }}
     .platform-amazon   {{ background: #ff990015; color: #ff9900; border: 1px solid #ff990030; }}
     .platform-walmart  {{ background: #0071dc15; color: #5ba3e8; border: 1px solid #0071dc30; }}
     .platform-target   {{ background: #cc000015; color: #ff4444; border: 1px solid #cc000030; }}
@@ -709,9 +734,85 @@ fn build_compare_html(session_id: &str) -> String {
       'vrbo':        '{vrbo_aff}',
       'tripadvisor': '{tripadvisor_aff}',
     }};
-    function affiliateUrl(url) {{
+    // ── Parse search dates/guests from search_context ──
+    // Cross-site contexts include: "Dates: 2026-05-25 to 2026-05-28. Guests: 2 adults, 1 children."
+    // Also from listings' original URLs or session data.
+    let _searchCheckin = "";
+    let _searchCheckout = "";
+    let _searchAdults = "";
+    let _searchChildren = "";
+    let _searchGuests = "";
+    function parseSearchContext(ctx) {{
+      if (!ctx) return;
+      const dateMatch = ctx.match(/Dates:\s*(\d{{4}}-\d{{2}}-\d{{2}})\s*to\s*(\d{{4}}-\d{{2}}-\d{{2}})/i);
+      if (dateMatch) {{ _searchCheckin = dateMatch[1]; _searchCheckout = dateMatch[2]; }}
+      const guestMatch = ctx.match(/Guests:\s*(\d+)\s*adults?/i);
+      if (guestMatch) _searchAdults = guestMatch[1];
+      const childMatch = ctx.match(/(\d+)\s*children/i);
+      if (childMatch) _searchChildren = childMatch[1];
+      // Also try "checkin=DATE&checkout=DATE" format from barcode contexts
+      const ciMatch = ctx.match(/checkin=(\d{{4}}-\d{{2}}-\d{{2}})/);
+      const coMatch = ctx.match(/checkout=(\d{{4}}-\d{{2}}-\d{{2}})/);
+      if (ciMatch && !_searchCheckin) _searchCheckin = ciMatch[1];
+      if (coMatch && !_searchCheckout) _searchCheckout = coMatch[1];
+      const aMatch = ctx.match(/adults=(\d+)/);
+      if (aMatch && !_searchAdults) _searchAdults = aMatch[1];
+    }}
+
+    // Inject dates/guests into listing URLs so the destination site shows pricing
+    function enrichListingUrl(url) {{
       try {{
         const u = new URL(url);
+        const h = u.hostname.toLowerCase();
+        if (!_searchCheckin) return url; // no dates to inject
+
+        if (h.includes("airbnb")) {{
+          if (!u.searchParams.has("check_in") && !u.searchParams.has("checkin")) {{
+            u.searchParams.set("check_in", _searchCheckin);
+            u.searchParams.set("check_out", _searchCheckout);
+          }}
+          if (_searchAdults && !u.searchParams.has("adults")) u.searchParams.set("adults", _searchAdults);
+          if (_searchChildren && !u.searchParams.has("children")) u.searchParams.set("children", _searchChildren);
+        }} else if (h.includes("booking")) {{
+          if (!u.searchParams.has("checkin")) {{
+            u.searchParams.set("checkin", _searchCheckin);
+            u.searchParams.set("checkout", _searchCheckout);
+          }}
+          if (_searchAdults && !u.searchParams.has("group_adults")) u.searchParams.set("group_adults", _searchAdults);
+          if (_searchChildren && !u.searchParams.has("group_children")) u.searchParams.set("group_children", _searchChildren);
+        }} else if (h.includes("expedia")) {{
+          if (!u.searchParams.has("startDate")) {{
+            u.searchParams.set("startDate", _searchCheckin);
+            u.searchParams.set("endDate", _searchCheckout);
+          }}
+          if (_searchAdults && !u.searchParams.has("adults")) u.searchParams.set("adults", _searchAdults);
+        }} else if (h.includes("vrbo")) {{
+          if (!u.searchParams.has("startDate")) {{
+            u.searchParams.set("startDate", _searchCheckin);
+            u.searchParams.set("endDate", _searchCheckout);
+          }}
+          if (_searchAdults && !u.searchParams.has("adults")) u.searchParams.set("adults", _searchAdults);
+        }} else if (h.includes("agoda")) {{
+          if (!u.searchParams.has("checkIn")) {{
+            u.searchParams.set("checkIn", _searchCheckin);
+            u.searchParams.set("checkOut", _searchCheckout);
+          }}
+          if (_searchAdults && !u.searchParams.has("adults")) u.searchParams.set("adults", _searchAdults);
+        }} else if (h.includes("hotels.com")) {{
+          if (!u.searchParams.has("q-check-in")) {{
+            u.searchParams.set("q-check-in", _searchCheckin);
+            u.searchParams.set("q-check-out", _searchCheckout);
+          }}
+        }}
+        return u.toString();
+      }} catch {{ return url; }}
+    }}
+
+    function affiliateUrl(url) {{
+      // First enrich with dates/guests, then add affiliate params
+      const enriched = enrichListingUrl(url);
+      try {{
+        const u = new URL(enriched);
         const h = u.hostname.toLowerCase();
         if (h.includes('booking') && NIRNAI_AFF.booking)     u.searchParams.set('aid', NIRNAI_AFF.booking);
         if (h.includes('amazon') && NIRNAI_AFF.amazon)        u.searchParams.set('tag', NIRNAI_AFF.amazon);
@@ -814,6 +915,29 @@ fn build_compare_html(session_id: &str) -> String {
     }}
 
     function renderResults(data) {{
+      // Parse dates/guests from search context so listing URLs carry them
+      parseSearchContext(data.search_context || "");
+      // Also try to extract from the original listings' URLs
+      if (!_searchCheckin && data.listings) {{
+        for (const l of data.listings) {{
+          try {{
+            const u = new URL(l.url || "");
+            const ci = u.searchParams.get("check_in") || u.searchParams.get("checkin") || "";
+            const co = u.searchParams.get("check_out") || u.searchParams.get("checkout") || "";
+            if (ci && co) {{ _searchCheckin = ci; _searchCheckout = co; break; }}
+          }} catch {{}}
+        }}
+      }}
+      if (!_searchAdults && data.listings) {{
+        for (const l of data.listings) {{
+          try {{
+            const u = new URL(l.url || "");
+            const a = u.searchParams.get("adults") || u.searchParams.get("group_adults") || "";
+            if (a) {{ _searchAdults = a; break; }}
+          }} catch {{}}
+        }}
+      }}
+
       const app = document.getElementById("app");
       const batch = data.result;
       const ranked = batch.ranked || [];

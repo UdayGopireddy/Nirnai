@@ -37,7 +37,7 @@
     "https://www.hotels.com/*",
     "https://www.tripadvisor.com/*",
     "https://www.google.com/travel/*",
-    "https://zpct3iakih.us-east-1.awsapprunner.com/*"
+    "https://nirnai.app/*"
   ],
   "background": {
     "service_worker": "dist/service-worker.js",

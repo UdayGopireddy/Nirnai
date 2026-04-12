@@ -14,6 +14,7 @@ from models import (
     DecisionStamp,
 )
 from purchase_scoring import detect_risk_flags
+from domain_classifier import ScoringDomain, classify_domain, get_label
 
 
 def compute_confidence(
@@ -62,47 +63,70 @@ def compute_confidence(
 def _build_purchase_reasons(
     breakdown: PurchaseBreakdown,
     review_trust: ReviewTrust,
+    product: ProductData | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Build positives and warnings from purchase breakdown."""
+    """Build positives and warnings from purchase breakdown.
+
+    Domain-aware: uses domain_classifier for context-specific labels.
+    """
     positives = []
     warnings = []
 
+    # Detect domain
+    domain = ScoringDomain.GENERAL
+    if product:
+        domain = classify_domain(
+            getattr(product, 'source_site', ''),
+            getattr(product, 'category', ''),
+            getattr(product, 'title', ''),
+        )
+
     # Reviews
     if review_trust.volume_confidence <= 20:
-        warnings.append("Low review count")
+        warnings.append(get_label(domain, "low_volume"))
     elif review_trust.trust_score >= 75:
-        positives.append("Strong reviews")
+        positives.append(get_label(domain, "strong_reviews"))
     elif review_trust.trust_score < 40:
-        warnings.append("Suspicious reviews")
+        warnings.append(get_label(domain, "suspicious_reviews"))
 
     if review_trust.volume_confidence >= 75:
-        positives.append("High review volume")
+        positives.append(get_label(domain, "high_volume"))
     elif review_trust.volume_confidence < 35 and review_trust.volume_confidence > 20:
-        warnings.append("Low review count")
+        warnings.append(get_label(domain, "low_volume"))
 
     # Price
     if breakdown.price >= 75:
-        positives.append("Strong value")
+        positives.append(get_label(domain, "strong_value"))
     elif breakdown.price >= 60:
-        positives.append("Fair value")
+        positives.append(get_label(domain, "fair_value"))
     elif breakdown.price < 40:
-        warnings.append("Poor value for price")
+        warnings.append(get_label(domain, "poor_value"))
 
     # Seller
     if breakdown.seller >= 80:
-        positives.append("Trusted seller")
+        positives.append(get_label(domain, "trusted_seller"))
+    elif breakdown.seller >= 65:
+        if domain == ScoringDomain.HOSPITALITY:
+            positives.append(get_label(domain, "good_seller"))
     elif breakdown.seller < 45:
-        warnings.append("Unknown seller")
+        warnings.append(get_label(domain, "unknown_seller"))
 
     # Returns
     if breakdown.returns >= 80:
-        positives.append("Easy returns")
+        positives.append(get_label(domain, "easy_returns"))
     elif breakdown.returns < 35:
-        warnings.append("Weak return policy")
+        warnings.append(get_label(domain, "weak_returns"))
 
     # Delivery
     if breakdown.delivery >= 80:
-        positives.append("Fast delivery")
+        positives.append(get_label(domain, "fast_delivery"))
+
+    # Quality
+    if domain == ScoringDomain.HOSPITALITY:
+        if breakdown.specs >= 75:
+            positives.append(get_label(domain, "good_quality"))
+        elif breakdown.specs < 35:
+            warnings.append(get_label(domain, "poor_quality"))
 
     return positives, warnings
 
@@ -151,17 +175,19 @@ def generate_stamp(
     health_breakdown: HealthBreakdown,
     review_trust: ReviewTrust,
     risk_flags: list[str] | None = None,
+    product: ProductData | None = None,
 ) -> tuple[DecisionStamp, str, list[str], list[str], list[str]]:
     """
     Generate the decision stamp per decision_stamp_badge_system spec.
 
     Phase 1 upgrade: risk_flags are surfaced directly in warnings.
+    Domain-aware: uses travel-specific language for travel listings.
 
     Returns: (stamp, legacy_decision, reasons, warnings, positives)
     """
     # Gather reasons
     purchase_positives, purchase_warnings = _build_purchase_reasons(
-        purchase_breakdown, review_trust
+        purchase_breakdown, review_trust, product
     )
 
     # Add risk flags to warnings (these bypass normal threshold logic)
@@ -198,10 +224,22 @@ def generate_stamp(
             stamp_type = "CHECK"
             legacy = "NEUTRAL"
     else:
-        if purchase_score >= 75:
+        # Domain-aware thresholds: hospitality has inherently sparser data
+        # (price requires dates, brand doesn't exist, etc.)
+        domain = ScoringDomain.GENERAL
+        if product:
+            domain = classify_domain(
+                getattr(product, 'source_site', ''),
+                getattr(product, 'category', ''),
+                getattr(product, 'title', ''),
+            )
+        buy_threshold = 70 if domain == ScoringDomain.HOSPITALITY else 75
+        avoid_threshold = 40 if domain == ScoringDomain.HOSPITALITY else 45
+
+        if purchase_score >= buy_threshold:
             stamp_type = "SMART_BUY"
             legacy = "BUY"
-        elif purchase_score < 45:
+        elif purchase_score < avoid_threshold:
             stamp_type = "AVOID"
             legacy = "DON'T BUY"
         else:

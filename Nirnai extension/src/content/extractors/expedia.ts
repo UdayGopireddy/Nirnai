@@ -179,28 +179,30 @@ export class ExpediaExtractor implements SiteExtractor {
       '[data-stid="property-listing"]',
       '[data-stid="lodging-card-responsive"]',
       '.uitk-card-has-primary-theme',
+      '[data-testid="property-card"]',
+      '[data-stid="property-card"]',
     ];
 
     let cards: Element[] = [];
     for (const sel of cardSelectors) {
       const found = document.querySelectorAll(sel);
-      if (found.length > 0) {
+      if (found.length > 1) {
         cards = Array.from(found);
         break;
       }
     }
 
-    // Fallback: find hotel detail links
+    // Generic fallback: find hotel links and walk up to parent card
     if (cards.length === 0) {
-      const links = document.querySelectorAll('a[href*="/h"][href*="Hotel"]');
+      const links = document.querySelectorAll('a[href*="/h"][href*="Hotel"], a[href*=".Hotel-Information"], a[href*="/ho"]');
       const seen = new Set<string>();
       for (const link of links) {
         const href = (link as HTMLAnchorElement).href;
         const key = href.split("?")[0];
         if (!seen.has(key)) {
           seen.add(key);
-          const container = link.closest('[data-stid]') || link.closest('.uitk-card') || link.parentElement?.parentElement;
-          if (container) cards.push(container);
+          const container = link.closest('[data-stid], [class*="card"], [class*="listing"], li, article') || link.parentElement?.parentElement;
+          if (container && container !== document.body) cards.push(container);
         }
       }
     }
@@ -219,36 +221,34 @@ export class ExpediaExtractor implements SiteExtractor {
 
   private extractSearchCard(card: Element): ProductData | null {
     // ── URL ──
-    const linkEl = card.querySelector('a[href*="/h"]') as HTMLAnchorElement | null;
+    const linkEl = (card.querySelector('a[href*="/h"], a[href*="Hotel"], a[href*="/ho"]') || card.querySelector('a')) as HTMLAnchorElement | null;
     const url = linkEl?.href || "";
     if (!url) return null;
 
     // ── Title ──
     const title =
       card.querySelector('[data-stid="content-hotel-title"]')?.textContent?.trim() ||
-      card.querySelector('h3')?.textContent?.trim() ||
+      card.querySelector('h3, h2')?.textContent?.trim() ||
       linkEl?.getAttribute("aria-label") ||
       "";
 
     // ── Price ──
     let price = "";
-    const priceEl = card.querySelector('[data-stid="content-hotel-lead-price"]') ||
-                    card.querySelector('.uitk-type-500');
+    const priceEl = card.querySelector('[data-stid="content-hotel-lead-price"], [class*="price"], .uitk-type-500');
     if (priceEl) {
       price = priceEl.textContent?.trim() || "";
     }
     if (!price) {
-      const spans = card.querySelectorAll("span");
+      const spans = card.querySelectorAll("span, div");
       for (const span of spans) {
         const text = span.textContent?.trim() || "";
-        if (/[\$€£₹¥]\s*[\d,]+/.test(text) && text.length < 20) { price = text; break; }
+        if (/^\$\d+/.test(text) && text.length < 20) { price = text; break; }
       }
     }
 
     // ── Rating ──
     let rating = "";
-    const ratingEl = card.querySelector('[data-stid="content-hotel-review-total"]') ||
-                     card.querySelector('.uitk-badge-base-text');
+    const ratingEl = card.querySelector('[data-stid="content-hotel-review-total"], [class*="rating"], [class*="badge"], [class*="score"]');
     if (ratingEl) {
       const text = ratingEl.textContent?.trim() || "";
       const match = text.match(/([\d.]+)/);

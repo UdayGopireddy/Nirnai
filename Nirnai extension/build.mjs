@@ -5,7 +5,7 @@ const isDev = process.env.NODE_ENV === "development";
 
 const API_URL = isDev
   ? "http://localhost:8000"
-  : "https://zpct3iakih.us-east-1.awsapprunner.com";
+  : "https://nirnai.app";
 
 console.log(`\n🔧 Building for ${isDev ? "DEVELOPMENT" : "PRODUCTION"} → ${API_URL}\n`);
 

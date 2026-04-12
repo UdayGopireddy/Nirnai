@@ -22,6 +22,10 @@ from __future__ import annotations
 import re
 from typing import Optional
 from models import ProductData, PurchaseBreakdown, ReviewTrust
+from domain_classifier import (
+    ScoringDomain, classify_domain, is_hospitality,
+    get_volume_score, get_popularity_score, get_price_range,
+)
 
 
 # ── Review Trust Score ───────────────────────────────────────────────────────
@@ -86,18 +90,8 @@ def _score_volume_confidence(product: ProductData) -> int:
     if count is None:
         return 30
 
-    if count > 50000:
-        return 98
-    if count > 10000:
-        return 90
-    if count > 5000:
-        return 80
-    if count > 1000:
-        return 70
-    if count > 500:
-        return 60
-    if count > 100:
-        return 50
+    domain = classify_domain(product.source_site, product.category, product.title)
+    return get_volume_score(domain, count)
     if count > 30:
         return 35
     return 20  # Very low confidence
@@ -201,8 +195,8 @@ def score_price(product: ProductData) -> int:
 
     # ── 2. Value ratio: quality signals relative to price tier ────
     # This is the core judgment: "Is what you GET worth what you PAY?"
-    category = _detect_category(product)
-    price_range = CATEGORY_PRICE_RANGES.get(category, CATEGORY_PRICE_RANGES["default"])
+    domain = classify_domain(product.source_site, product.category, product.title)
+    price_range = get_price_range(domain)
     mid = price_range["mid"]
 
     rating = _parse_rating(product)
@@ -317,72 +311,18 @@ def _detect_discount(price_str: str) -> Optional[float]:
     return None
 
 
-# ── Category detection + price ranges ─────────────────────────────
-
-# Price tiers in USD (approximate; used for relative scoring, not absolute judgment)
-CATEGORY_PRICE_RANGES = {
-    "electronics":    {"budget": 30,  "mid": 150, "premium": 600},
-    "personal_care":  {"budget": 6,   "mid": 20,  "premium": 50},
-    "beauty":         {"budget": 10,  "mid": 35,  "premium": 80},
-    "food":           {"budget": 5,   "mid": 15,  "premium": 40},
-    "home":           {"budget": 15,  "mid": 60,  "premium": 200},
-    "clothing":       {"budget": 15,  "mid": 50,  "premium": 150},
-    "toys":           {"budget": 10,  "mid": 30,  "premium": 80},
-    "books":          {"budget": 5,   "mid": 15,  "premium": 40},
-    "sports":         {"budget": 15,  "mid": 50,  "premium": 200},
-    "travel":         {"budget": 60,  "mid": 180, "premium": 450},
-    "default":        {"budget": 15,  "mid": 60,  "premium": 250},
-}
-
-_CATEGORY_KEYWORDS = {
-    "electronics": ["laptop", "phone", "headphone", "earbuds", "speaker", "camera", "tablet",
-                     "monitor", "keyboard", "mouse", "charger", "cable", "tv", "television",
-                     "watch", "smartwatch", "console", "gaming", "usb", "bluetooth", "wireless"],
-    "personal_care": ["shampoo", "conditioner", "soap", "toothpaste", "deodorant", "lotion",
-                       "sunscreen", "razor", "body wash", "moisturizer", "face wash", "cream"],
-    "beauty": ["makeup", "lipstick", "foundation", "mascara", "eyeshadow", "perfume",
-                "cologne", "serum", "skincare", "nail", "cosmetic"],
-    "food": ["snack", "cereal", "chocolate", "protein", "vitamin", "supplement",
-             "organic", "granola", "coffee", "tea", "drink", "juice", "water"],
-    "home": ["furniture", "mattress", "pillow", "bedding", "curtain", "rug", "lamp",
-             "shelf", "storage", "organizer", "kitchen", "cookware", "blender"],
-    "clothing": ["shirt", "pants", "jacket", "shoes", "boots", "dress", "jeans",
-                  "sneakers", "socks", "underwear", "hoodie", "coat", "sweater"],
-    "toys": ["toy", "lego", "puzzle", "doll", "action figure", "board game", "plush"],
-    "books": ["book", "novel", "paperback", "hardcover", "kindle", "audiobook"],
-    "sports": ["fitness", "yoga", "dumbbell", "gym", "bicycle", "hiking", "camping",
-                "running", "tennis", "basketball", "football"],
-    "travel": ["airbnb", "hotel", "hostel", "resort", "villa", "cabin", "booking",
-                "accommodation", "rental", "stay"],
-}
-
-
-def _detect_category(product: ProductData) -> str:
-    """Detect product category from available fields."""
-    # Check source_site for travel
-    if product.source_site in ("airbnb", "booking", "vrbo", "hotels", "agoda",
-                                "tripadvisor", "expedia", "googletravel"):
-        return "travel"
-
-    # Check explicit category field
-    cat_lower = product.category.lower()
-    for cat, keywords in _CATEGORY_KEYWORDS.items():
-        if any(kw in cat_lower for kw in keywords):
-            return cat
-
-    # Fall back to title
-    title_lower = product.title.lower()
-    for cat, keywords in _CATEGORY_KEYWORDS.items():
-        if any(kw in title_lower for kw in keywords):
-            return cat
-
-    return "default"
-
-
 def score_seller(product: ProductData) -> int:
-    """Score seller trustworthiness (0-100)."""
+    """Score seller trustworthiness (0-100).
+
+    Domain-aware: for hospitality, 'seller' is a host — scored differently.
+    """
+    domain = classify_domain(product.source_site, product.category, product.title)
     seller = product.seller.lower()
     fulfiller = getattr(product, 'fulfiller', '').lower()
+
+    # ── Hospitality: score HOST trust ────────────────────────────
+    if domain == ScoringDomain.HOSPITALITY:
+        return _score_host_trust(product)
 
     if not seller:
         # Even with unknown seller, Amazon fulfillment is a trust boost
@@ -409,13 +349,78 @@ def score_seller(product: ProductData) -> int:
     return 55  # Unknown third-party
 
 
+def _score_host_trust(product: ProductData) -> int:
+    """Score Airbnb/travel host trust from fulfiller (superhost status) and reviews."""
+    score = 50
+    fulfiller = getattr(product, 'fulfiller', '').lower()
+    host = product.seller.strip()
+
+    # Host exists
+    if host:
+        score += 10
+    else:
+        # Host name not extracted — don't penalize heavily since all
+        # Airbnb listings require a host. Score neutral and rely on
+        # other signals (fulfiller, review quality).
+        score += 0
+
+    # Superhost / status signals (stored in fulfiller by Airbnb extractor)
+    if 'superhost' in fulfiller:
+        score += 20
+    if 'response rate' in fulfiller:
+        # Try to extract response rate percentage
+        m = re.search(r'(\d+)%\s*response', fulfiller)
+        if m and int(m.group(1)) >= 90:
+            score += 8
+        elif m and int(m.group(1)) >= 70:
+            score += 4
+    if 'year' in fulfiller:
+        # Experience: "hosting for X years"
+        m = re.search(r'(\d+)\s*year', fulfiller)
+        if m:
+            years = int(m.group(1))
+            if years >= 5:
+                score += 8
+            elif years >= 2:
+                score += 4
+
+    # Strong reviews = trust
+    rating = _parse_rating(product)
+    count = _parse_review_count(product)
+    if rating and rating >= 4.5 and count and count >= 50:
+        score += 10
+    elif rating and rating >= 4.0 and count and count >= 20:
+        score += 5
+
+    return max(0, min(100, score))
+
+
 def score_returns(product: ProductData) -> int:
-    """Score return policy (0-100)."""
+    """Score return/cancellation policy (0-100).
+
+    Domain-aware: for hospitality, 'returnPolicy' is the cancellation policy.
+    """
     policy = product.returnPolicy.lower()
+    domain = classify_domain(product.source_site, product.category, product.title)
 
     if not policy:
         return 50
 
+    # ── Hospitality: cancellation policy ─────────────────────────
+    if domain == ScoringDomain.HOSPITALITY:
+        if "free cancellation" in policy or "full refund" in policy:
+            return 90
+        if "flexible" in policy:
+            return 85
+        if "moderate" in policy:
+            return 65
+        if "strict" in policy or "non-refundable" in policy or "no refund" in policy:
+            return 25
+        if "cancel" in policy:
+            return 60  # Some cancellation mentioned
+        return 50
+
+    # ── Shopping: return policy ──────────────────────────────────
     if "no return" in policy or "non-returnable" in policy:
         return 20
     if "replacement" in policy:
@@ -429,7 +434,7 @@ def score_returns(product: ProductData) -> int:
 
 
 def score_popularity(product: ProductData) -> int:
-    """Score popularity based on review count (0-100)."""
+    """Score popularity based on review count (0-100). Domain-aware thresholds."""
     count_match = re.search(
         r"([\d,]+)", product.reviewCount.replace(",", "")
     )
@@ -437,26 +442,21 @@ def score_popularity(product: ProductData) -> int:
         return 40
 
     count = int(count_match.group(1).replace(",", ""))
-
-    if count > 50000:
-        return 95
-    if count > 10000:
-        return 85
-    if count > 5000:
-        return 75
-    if count > 1000:
-        return 65
-    if count > 100:
-        return 50
-    return 30
+    domain = classify_domain(product.source_site, product.category, product.title)
+    return get_popularity_score(domain, count)
 
 
 def score_quality_signals(product: ProductData) -> int:
     """Score product quality from brand, data richness, and brand-seller consistency.
 
-    Replaces the old score_specs() which just counted filled fields.
-    Now uses brand as a first-class signal + detects brand-seller mismatches.
+    Domain-aware: for hospitality, evaluates amenities, host quality, and listing completeness.
     """
+    domain = classify_domain(product.source_site, product.category, product.title)
+
+    # ── Hospitality: amenity/listing quality ─────────────────────
+    if domain == ScoringDomain.HOSPITALITY:
+        return _score_travel_quality(product)
+
     score = 50  # Neutral baseline
 
     brand = product.brand.strip().lower()
@@ -504,6 +504,55 @@ def score_quality_signals(product: ProductData) -> int:
     return max(0, min(100, score))
 
 
+def _score_travel_quality(product: ProductData) -> int:
+    """Score travel listing quality from amenities, property details, and data richness."""
+    score = 50
+
+    # Amenities (stored in ingredients field)
+    amenities = product.ingredients.lower()
+    if amenities:
+        # Count meaningful amenities
+        amenity_keywords = [
+            "wifi", "kitchen", "parking", "pool", "washer", "dryer",
+            "air conditioning", "heating", "tv", "workspace",
+            "gym", "hot tub", "fireplace", "patio", "balcony",
+            "dishwasher", "coffee", "iron", "hair dryer",
+        ]
+        amenity_count = sum(1 for kw in amenity_keywords if kw in amenities)
+        if amenity_count >= 10:
+            score += 20
+        elif amenity_count >= 6:
+            score += 12
+        elif amenity_count >= 3:
+            score += 6
+    else:
+        score -= 5
+
+    # Category ratings / detailed reviews (in nutritionInfo)
+    nutrition = product.nutritionInfo.lower()
+    if nutrition:
+        # Airbnb category ratings: cleanliness, accuracy, communication, location, check-in, value
+        rating_cats = ["cleanliness", "accuracy", "communication", "location", "check-in", "value"]
+        cats_found = sum(1 for c in rating_cats if c in nutrition)
+        if cats_found >= 4:
+            score += 10
+        elif cats_found >= 2:
+            score += 5
+
+    # Listing completeness
+    data_fields = sum(1 for v in [
+        product.title, product.price, product.rating,
+        product.reviewCount, product.seller, product.delivery,
+        product.returnPolicy, product.category, amenities,
+    ] if v)
+    if data_fields >= 7:
+        score += 8
+    elif data_fields <= 3:
+        score -= 8
+
+    return max(0, min(100, score))
+
+
 # Known brands (lowercase) — major brands with reputation stakes
 KNOWN_BRANDS = [
     "apple", "samsung", "sony", "lg", "bose", "nike", "adidas", "puma",
@@ -520,12 +569,34 @@ KNOWN_BRANDS = [
 
 
 def score_delivery(product: ProductData) -> int:
-    """Score delivery (0-100)."""
+    """Score delivery / check-in experience (0-100).
+
+    Domain-aware: for hospitality, 'delivery' is the check-in/property details.
+    """
     delivery = product.delivery.lower()
+    domain = classify_domain(product.source_site, product.category, product.title)
 
     if not delivery:
         return 50
 
+    # ── Hospitality: check-in, property details ──────────────────
+    if domain == ScoringDomain.HOSPITALITY:
+        score = 55  # baseline
+        if "self check-in" in delivery or "self-check-in" in delivery:
+            score += 12
+        if "keypad" in delivery or "lockbox" in delivery or "smart lock" in delivery:
+            score += 8
+        # Guest capacity / property details
+        if re.search(r'\d+\s*guest', delivery):
+            score += 5
+        if re.search(r'\d+\s*bed', delivery):
+            score += 5
+        # Early check-in / late checkout
+        if "early" in delivery or "flexible" in delivery:
+            score += 5
+        return max(0, min(100, score))
+
+    # ── Shopping: delivery speed ─────────────────────────────────
     if "free" in delivery:
         return 90
     if "prime" in delivery:
@@ -592,22 +663,41 @@ def _compute_data_confidence(product: ProductData, review_trust: ReviewTrust) ->
 
     Low confidence → score pulled toward 50 (we don't know enough to judge).
     High confidence → raw score stands.
+
+    Domain-aware: hospitality has lower review volumes but higher per-review
+    trust, and listings don't have "brands" — so we adjust accordingly.
     """
+    domain = classify_domain(product.source_site, product.category, product.title)
     conf = 0.5
 
     # Review volume is the strongest confidence signal
     count = _parse_review_count(product)
     if count is not None:
-        if count > 1000:
-            conf += 0.25
-        elif count > 200:
-            conf += 0.18
-        elif count > 50:
-            conf += 0.10
-        elif count > 10:
-            conf += 0.03
+        if domain == ScoringDomain.HOSPITALITY:
+            # Hospitality: 200+ reviews is very high confidence
+            if count > 500:
+                conf += 0.28
+            elif count > 200:
+                conf += 0.25
+            elif count > 100:
+                conf += 0.18
+            elif count > 30:
+                conf += 0.10
+            elif count > 10:
+                conf += 0.05
+            else:
+                conf -= 0.03
         else:
-            conf -= 0.05  # Very few reviews — less confident
+            if count > 1000:
+                conf += 0.25
+            elif count > 200:
+                conf += 0.18
+            elif count > 50:
+                conf += 0.10
+            elif count > 10:
+                conf += 0.03
+            else:
+                conf -= 0.05  # Very few reviews — less confident
 
     # Rating exists
     rating = _parse_rating(product)
@@ -626,9 +716,10 @@ def _compute_data_confidence(product: ProductData, review_trust: ReviewTrust) ->
     if product.seller.strip():
         conf += 0.05
 
-    # Brand known
-    if product.brand.strip():
-        conf += 0.03
+    # Brand known (skip for hospitality — listings don't have brands)
+    if domain != ScoringDomain.HOSPITALITY:
+        if product.brand.strip():
+            conf += 0.03
 
     # Review trust quality (distribution, authenticity)
     if review_trust.distribution_quality < 30:
@@ -671,12 +762,18 @@ def detect_risk_flags(product: ProductData, review_trust: ReviewTrust) -> list[s
             risks.append(f"Premium brand ({product.brand}) sold by unverified seller")
 
     # 3. Missing critical data
+    domain = classify_domain(product.source_site, product.category, product.title)
     if not product.price:
-        risks.append("No price information available")
+        if domain == ScoringDomain.HOSPITALITY:
+            risks.append("No price information available — select dates for pricing")
+        else:
+            risks.append("No price information available")
     if not rating and not count:
         risks.append("No reviews or ratings — unverified product")
     if not seller:
-        risks.append("Unknown seller")
+        if domain != ScoringDomain.HOSPITALITY:
+            # Hospitality always has hosts; empty seller = extraction gap, not a risk
+            risks.append("Unknown seller")
 
     # 4. Distribution quality
     if review_trust.distribution_quality < 25:

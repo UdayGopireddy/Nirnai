@@ -633,10 +633,13 @@ NEVER rank a listing last simply because its raw number looks large in an expens
 
 Your job: Find the option that maximizes the probability of a GREAT experience.
 
-You may receive 5 to 15 listings collected from across the search area.
-Your task is to evaluate ALL of them and return the BEST 5 ranked.
-The other listings should be dropped — they didn't make the cut.
-This means your #1 pick is the best option out of the ENTIRE pool, not just the top of an arbitrary list.
+You may receive 5 to 20 listings collected from across the search area.
+Your task is to evaluate ALL of them and return the BEST 10 ranked from best to worst.
+If fewer than 10 listings have meaningful data, return as many as you can rank.
+When listings come from multiple platforms (Airbnb, Booking.com, Expedia, etc.),
+you MUST rank them together fairly — do NOT favor any single platform.
+A $112 Booking.com hotel with a 4.5 rating should outrank a $650 Airbnb with a similar rating.
+Source platform is IRRELEVANT to quality — only price, reviews, trust, and amenities matter.
 
 If AREA CONTEXT is provided in the system prompt, factor it into your ranking:
 - In dense urban areas: walkability, transit, noise level, and block-level location quality matter

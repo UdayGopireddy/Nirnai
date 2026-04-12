@@ -74,39 +74,91 @@ export class TripadvisorExtractor implements SiteExtractor {
 
   extractSearchListings(maxResults: number = 20): ProductData[] {
     const listings: ProductData[] = [];
-    const cards = document.querySelectorAll('[data-automation="hotel-card-title"], .listing_title, .prw_rup.prw_meta_hsx_responsive_listing, [data-test-target="property-card"]');
 
-    // Try the more modern card layout first
-    const modernCards = document.querySelectorAll('[data-test-target="property-card"], .property-card, [data-automation="hotel-card"]');
-    const cardList = modernCards.length > 0 ? modernCards : cards;
+    // Try multiple known selectors in priority order
+    const cardSelectors = [
+      '[data-test-target="property-card"]',
+      '[data-automation="hotel-card"]',
+      '.property-card',
+      '[data-automation="hotel-card-title"]',
+      '.listing_title',
+      '.prw_rup.prw_meta_hsx_responsive_listing',
+      // Modern TripAdvisor (2025+)
+      'div[data-automation="hotel-card-list"] > div',
+      'div[class*="resultCard"]',
+      'div[class*="PropertyCard"]',
+    ];
+    let cards: Element[] = [];
+    for (const sel of cardSelectors) {
+      const found = document.querySelectorAll(sel);
+      if (found.length > 1) { cards = Array.from(found); break; }
+    }
 
-    for (const card of cardList) {
-      if (listings.length >= maxResults) break;
-      if (card.querySelector('.sponsored-label, [data-test-target="sponsored"]')) continue;
+    // Generic fallback: find hotel links
+    if (cards.length === 0) {
+      const links = document.querySelectorAll('a[href*="Hotel_Review"], a[href*="/Hotel/"], a[href*="VacationRentalReview"]');
+      const seen = new Set<string>();
+      for (const link of links) {
+        const href = (link as HTMLAnchorElement).href;
+        const key = href.split("?")[0];
+        if (seen.has(key) || href.includes("/ShowUserReviews")) continue;
+        seen.add(key);
+        const container = link.closest('[class*="card"], [class*="listing"], [class*="result"], li, article, [class*="property"]') || link.parentElement?.parentElement;
+        if (container && container !== document.body) cards.push(container);
+      }
+    }
 
-      const titleEl = card.querySelector('[data-automation="hotel-card-title"] a, .listing_title a, a[data-test-target="property-link"], .property-name a');
-      const title = titleEl?.textContent?.trim() || "";
-      if (!title) continue;
-      const linkEl = (titleEl || card.querySelector('a')) as HTMLAnchorElement | null;
-      const url = linkEl ? new URL(linkEl.href, window.location.origin).href : "";
-      if (!url) continue;
+    for (const card of cards.slice(0, maxResults)) {
+      try {
+        if (card.querySelector('.sponsored-label, [data-test-target="sponsored"], [class*="sponsor"]')) continue;
 
-      const priceEl = card.querySelector('[data-automation="hotel-card-price"], .price, [data-test-target="property-price"], .prw_rup .price');
-      const ratingEl = card.querySelector('[data-automation="hotel-card-rating"], .ui_bubble_rating, [data-test-target="review-rating"], svg[aria-label*="bubble"]');
-      const reviewEl = card.querySelector('[data-automation="hotel-card-review-count"], .review_count, [data-test-target="review-count"]');
-      const imgEl = card.querySelector<HTMLImageElement>('[data-automation="hotel-card-image"] img, .listing-photo img, img[data-test-target="property-image"]');
+        const titleEl = card.querySelector('[data-automation="hotel-card-title"] a, [data-test-target="property-link"], a[href*="Hotel_Review"], a[href*="/Hotel/"], h3, h2, [class*="title"] a');
+        const title = titleEl?.textContent?.trim() || (card.querySelector('a') as HTMLAnchorElement)?.getAttribute('aria-label') || "";
+        if (!title || title.length < 3) continue;
+        const linkEl = (card.querySelector('a[href*="Hotel_Review"], a[href*="/Hotel/"]') || titleEl || card.querySelector('a')) as HTMLAnchorElement | null;
+        const url = linkEl?.href ? new URL(linkEl.href, window.location.origin).href : "";
+        if (!url) continue;
 
-      listings.push({
-        title, brand: "",
-        price: priceEl?.textContent?.trim() || "",
-        currency: "USD",
-        rating: ratingEl?.getAttribute("aria-label") || ratingEl?.getAttribute("class")?.match(/bubble_(\d+)/)?.[1]?.replace(/(\d)(\d)/, "$1.$2") || "",
-        reviewCount: reviewEl?.textContent?.trim().replace(/[(),reviews ]/gi, "") || "",
-        seller: "Tripadvisor", fulfiller: "Tripadvisor",
-        ingredients: "", nutritionInfo: "", returnPolicy: "", delivery: "", category: "Hotel",
-        url, imageUrl: imgEl?.src || "",
-        barcode: "", source_site: "tripadvisor", page_type: "search",
-      });
+        // Price
+        let price = card.querySelector('[data-automation="hotel-card-price"], [data-test-target="property-price"], [class*="price"]')?.textContent?.trim() || "";
+        if (!price) {
+          for (const span of card.querySelectorAll('span, div')) {
+            const t = span.textContent?.trim() || "";
+            if (/^\$\d+/.test(t) && t.length < 20) { price = t; break; }
+          }
+        }
+
+        // Rating — try aria-label, bubble classes, or text
+        let rating = "";
+        const ratingEl = card.querySelector('[aria-label*="bubble"], [aria-label*="star"], [aria-label*="rating"], [class*="bubble"], svg[aria-label], [class*="rating"], [class*="score"]');
+        if (ratingEl) {
+          const ariaLabel = ratingEl.getAttribute('aria-label') || "";
+          const rMatch = ariaLabel.match(/([\d.]+)/);
+          if (rMatch) rating = rMatch[1];
+          if (!rating) {
+            const classMatch = ratingEl.getAttribute('class')?.match(/bubble_(\d+)/);
+            if (classMatch) rating = (parseInt(classMatch[1]) / 10).toFixed(1);
+          }
+          if (!rating) {
+            const textMatch = ratingEl.textContent?.trim()?.match(/([\d.]+)/);
+            if (textMatch) rating = textMatch[1];
+          }
+        }
+
+        // Review count
+        const cardText = card.textContent || "";
+        const revMatch = cardText.match(/([\d,]+)\s*reviews?/i);
+        const reviewCount = revMatch ? revMatch[1] : "";
+
+        const imgEl = card.querySelector('img') as HTMLImageElement | null;
+        listings.push({
+          title, brand: "", price, currency: "USD", rating, reviewCount,
+          seller: "Tripadvisor", fulfiller: "Tripadvisor",
+          ingredients: "", nutritionInfo: "", returnPolicy: "", delivery: "", category: "Hotel",
+          url: url.split("?")[0], imageUrl: imgEl?.src || "",
+          barcode: "", source_site: "tripadvisor", page_type: "search",
+        });
+      } catch {}
     }
     return listings;
   }
@@ -153,10 +205,48 @@ export class TripadvisorExtractor implements SiteExtractor {
   extractProduct(): ProductData {
     const jsonLd = getJsonLd();
     const title = getMeta("og:title")?.replace(/ - (?:Prices|Reviews|Updated).*/i, "") || jsonLd?.name || extractText(['#HEADING', '[data-test-target="hotel-header-name"]', 'h1']);
-    const price = jsonLd?.offers?.price?.toString() || extractText(['[data-test-target="price-summary"]', '.price', '.prw_rup .price']);
-    const rating = jsonLd?.aggregateRating?.ratingValue?.toString() || extractText(['[data-test-target="review-rating"]', '.ui_bubble_rating']);
-    const reviewCount = jsonLd?.aggregateRating?.reviewCount?.toString() || extractText(['[data-test-target="review-count"]', '.reviewCount']);
-    const imageUrl = getMeta("og:image") || jsonLd?.image || document.querySelector<HTMLImageElement>('.heroPhoto img, [data-test-target="hero-image"] img')?.src || "";
+
+    // ── Price ──
+    let price = jsonLd?.offers?.price?.toString() || "";
+    if (!price) price = extractText(['[data-test-target="price-summary"]', '[class*="price"]', '.prw_rup .price']);
+    if (!price) {
+      for (const el of document.querySelectorAll('span, div')) {
+        const t = el.textContent?.trim() || "";
+        if (/^\$\d[\d,]*$/.test(t) && t.length < 15) { price = t; break; }
+      }
+    }
+
+    // ── Rating ──
+    let rating = jsonLd?.aggregateRating?.ratingValue?.toString() || "";
+    if (!rating) {
+      // Try aria-label on bubble/star elements
+      const ratingEl = document.querySelector('[aria-label*="bubble"], [aria-label*="star"], [aria-label*="rating"], svg[aria-label], [class*="bubble"], [class*="rating"]');
+      if (ratingEl) {
+        const ariaLabel = ratingEl.getAttribute('aria-label') || "";
+        const rMatch = ariaLabel.match(/([\d.]+)/);
+        if (rMatch) rating = rMatch[1];
+        if (!rating) {
+          const classMatch = ratingEl.getAttribute('class')?.match(/bubble_(\d+)/);
+          if (classMatch) rating = (parseInt(classMatch[1]) / 10).toFixed(1);
+        }
+      }
+    }
+    if (!rating) {
+      const body = document.body.innerText || "";
+      const rMatch = body.match(/(\d+\.?\d*)\s*(?:of 5|out of 5|\/ ?5)/i);
+      if (rMatch) rating = rMatch[1];
+    }
+
+    // ── Review count ──
+    let reviewCount = jsonLd?.aggregateRating?.reviewCount?.toString() || "";
+    if (!reviewCount) reviewCount = extractText(['[data-test-target="review-count"]', '[class*="reviewCount"]', '.reviewCount']).replace(/[(),reviews ]/gi, "");
+    if (!reviewCount) {
+      const body = document.body.innerText || "";
+      const revMatch = body.match(/([\d,]+)\s*reviews?/i);
+      if (revMatch) reviewCount = revMatch[1];
+    }
+
+    const imageUrl = getMeta("og:image") || jsonLd?.image || document.querySelector<HTMLImageElement>('.heroPhoto img, [data-test-target="hero-image"] img, img[data-testid]')?.src || "";
     return {
       title, brand: "", price, currency: "USD", rating, reviewCount,
       seller: "Tripadvisor", fulfiller: "Tripadvisor",

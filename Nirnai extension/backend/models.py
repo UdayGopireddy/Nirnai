@@ -140,3 +140,34 @@ class HealthExtractionResponse(BaseModel):
     ingredient_flags: list[str]
     health_score: int
     health_breakdown: HealthBreakdown
+
+
+# ── Batch comparison / ranking models ──
+
+class RankedListing(BaseModel):
+    rank: int
+    title: str
+    price: str = ""
+    url: str = ""
+    image_url: str = ""
+    purchase_score: int = 0
+    health_score: int = 0
+    confidence_tier: str = "medium"
+    decision: str = "CHECK"
+    stamp: DecisionStamp
+    review_trust: ReviewTrust
+    why_ranked: str = ""
+    tradeoffs: list[str] = []
+    positives: list[str] = []
+    warnings: list[str] = []
+
+
+class BatchResponse(BaseModel):
+    ranked: list[RankedListing]
+    comparison_summary: str = ""
+
+
+class BatchRankRequest(BaseModel):
+    system_prompt: str
+    user_prompt: str
+    listings: list[ProductData] = []

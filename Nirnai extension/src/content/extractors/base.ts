@@ -168,9 +168,18 @@ export function detectSiteExtractor(
   extractors: SiteExtractor[]
 ): SiteExtractor | null {
   const hostname = window.location.hostname;
+  const pathname = window.location.pathname;
 
   for (const extractor of extractors) {
-    if (hostname.includes(extractor.siteName())) {
+    const name = extractor.siteName();
+    // Special case: Google Travel lives at google.com/travel/*
+    if (name === "googletravel") {
+      if (hostname.includes("google.com") && pathname.startsWith("/travel")) {
+        return extractor;
+      }
+      continue;
+    }
+    if (hostname.includes(name)) {
       return extractor;
     }
   }

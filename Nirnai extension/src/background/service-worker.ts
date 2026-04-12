@@ -557,8 +557,8 @@ function buildCrossSiteUrl(site: string, params: CrossSiteSearchParams): string 
 //   5. Per-site timeout (20s) is just cleanup for truly dead tabs
 // ═══════════════════════════════════════════════════════════════════════════
 
-const COLLECTION_WINDOW_MS = 25_000; // 25s to gather listings from all sites
-const PER_SITE_TIMEOUT_MS  = 20_000; // 20s per site — just cleanup, not the driver
+const COLLECTION_WINDOW_MS = 35_000; // 35s to gather listings from all sites (heavy SPAs need time)
+const PER_SITE_TIMEOUT_MS  = 30_000; // 30s per site — just cleanup, not the driver
 
 // ── Source Classification ──
 // Roles are informational for the ranking prompt context — not for launch ordering.
@@ -774,36 +774,82 @@ function finishCrossSiteCollection(): void {
     return;
   }
 
-  // Cap at 20 listings — server rejects >20, and more would be expensive to rank.
-  // Distribute evenly across sources so no single site dominates the ranking.
-  let allListings: ProductData[];
-  if (rawListings.length <= 20) {
-    allListings = rawListings;
-  } else {
-    // Group by source_site
-    const bySite = new Map<string, ProductData[]>();
-    for (const l of rawListings) {
-      const site = (l as any).source_site || "unknown";
-      if (!bySite.has(site)) bySite.set(site, []);
-      bySite.get(site)!.push(l);
-    }
+  // ── LOCAL SCORING: Score each listing deterministically, take top 5 per site ──
+  // This pre-filters before GPT, ensuring diversity + quality + no wasted tokens.
+  function localScore(l: any): number {
+    let score = 0;
 
-    // Round-robin: take equal share from each source, then fill remaining
-    const siteCount = bySite.size;
-    const perSite = Math.floor(20 / siteCount);
-    const selected: ProductData[] = [];
-    const remainder: ProductData[] = [];
-    for (const [, listings] of bySite) {
-      selected.push(...listings.slice(0, perSite));
-      remainder.push(...listings.slice(perSite));
+    // Price exists and has a number (0 or 30)
+    const priceNum = parseFloat((l.price || "").replace(/[^0-9.]/g, ""));
+    if (priceNum > 0) score += 30;
+
+    // Rating (0-25) — normalize to 5-star scale
+    let rating = parseFloat(l.rating || "0");
+    if (rating > 5) rating = rating / 2; // Booking uses 1-10 scale
+    if (rating > 0) score += Math.min(25, (rating / 5) * 25);
+
+    // Review count (0-20) — log scale, diminishing returns
+    const reviews = parseInt((l.reviewCount || "0").replace(/[^0-9]/g, ""), 10);
+    if (reviews > 0) score += Math.min(20, Math.log10(reviews + 1) * 7);
+
+    // Data completeness (0-15)
+    if (l.title && l.title.trim()) score += 5;
+    if (l.imageUrl && l.imageUrl.trim()) score += 3;
+    if (l.fulfiller && l.fulfiller.trim()) score += 4; // cancellation/host info
+    if (l.ingredients && l.ingredients.trim()) score += 3; // amenities
+
+    return Math.round(score);
+  }
+
+  const TOP_PER_SITE = 5;
+  const MAX_TOTAL = 15;
+
+  // Group by source_site
+  const bySite = new Map<string, ProductData[]>();
+  for (const l of rawListings) {
+    const site = (l as any).source_site || "unknown";
+    if (!bySite.has(site)) bySite.set(site, []);
+    bySite.get(site)!.push(l);
+  }
+
+  // Score and select top per site
+  const scored: ProductData[] = [];
+  for (const [site, listings] of bySite) {
+    // Score each listing
+    const withScores = listings.map(l => ({ listing: l, score: localScore(l) }));
+    withScores.sort((a, b) => b.score - a.score);
+
+    // Take top N, but keep at least 2 "wildcards" if a site has 0 priced listings
+    const topN = withScores.slice(0, TOP_PER_SITE);
+    const selected = topN.filter(s => s.score >= 5); // minimum bar: at least a title
+    const wildcards = topN.slice(0, 2).filter(s => !selected.includes(s));
+
+    const sitePicks = [...selected, ...wildcards].slice(0, TOP_PER_SITE);
+    console.log(`NirnAI: [${site}] ${listings.length} raw → ${sitePicks.length} selected (scores: ${sitePicks.map(s => s.score).join(",")})`);
+    scored.push(...sitePicks.map(s => s.listing));
+  }
+
+  // Cap total if still over MAX_TOTAL — score globally and take the best
+  let allListings: ProductData[];
+  if (scored.length <= MAX_TOTAL) {
+    allListings = scored;
+  } else {
+    const globalScored = scored.map(l => ({ listing: l, score: localScore(l) }));
+    globalScored.sort((a, b) => b.score - a.score);
+    // But ensure at least 2 per site survive
+    const siteCounts = new Map<string, number>();
+    const final: ProductData[] = [];
+    for (const { listing } of globalScored) {
+      const site = (listing as any).source_site || "unknown";
+      const count = siteCounts.get(site) || 0;
+      if (final.length < MAX_TOTAL || count < 2) {
+        final.push(listing);
+        siteCounts.set(site, count + 1);
+        if (final.length >= MAX_TOTAL + bySite.size * 2) break; // safety cap
+      }
     }
-    // Fill remaining slots with leftover listings
-    const remaining = 20 - selected.length;
-    if (remaining > 0) {
-      selected.push(...remainder.slice(0, remaining));
-    }
-    allListings = selected;
-    console.log(`NirnAI: Distributed ${rawListings.length}→${allListings.length} listings across ${siteCount} sources (${perSite}/site)`);
+    allListings = final.slice(0, MAX_TOTAL);
+    console.log(`NirnAI: Global cap ${scored.length}→${allListings.length}`);
   }
 
   // Log source distribution
@@ -814,23 +860,33 @@ function finishCrossSiteCollection(): void {
   }
   console.log(`NirnAI: Ranking ${allListings.length} listings — distribution:`, JSON.stringify(sourceDist));
 
+  // Final safety: drop anything with score 0 (no title, no price, no rating, nothing)
+  const finalListings = allListings.filter((l: any) => localScore(l) > 0);
+  if (finalListings.length < allListings.length) {
+    console.log(`NirnAI: Dropped ${allListings.length - finalListings.length} zero-score listings`);
+  }
+
   // Tell origin tab we're now ranking
   chrome.tabs.sendMessage(session.originTabId, {
     action: "CROSS_SITE_PROGRESS",
     phase: "ranking",
-    detail: `Ranking ${allListings.length} listings from ${sourcesUsed.join(", ")} (${elapsed}s)`,
+    detail: `Ranking ${finalListings.length} listings from ${sourcesUsed.join(", ")} (${elapsed}s)`,
     sourcesReported: sourcesUsed,
     coreSourceCount: coreUsed.length,
   }).catch(() => {});
 
   const crossSiteContext = session.searchContext +
-    `\n\nCROSS-SITE COMPARISON: ${allListings.length} listings from ${sourcesUsed.length} platforms ` +
+    `\n\nCROSS-SITE COMPARISON: ${finalListings.length} listings from ${sourcesUsed.length} platforms ` +
     `(core: ${coreUsed.join(", ")}${expanderUsed.length ? "; supporting: " + expanderUsed.join(", ") : ""}). ` +
     `Collected in ${elapsed}s. Rank purely by value — do NOT favor any platform. Note the source site for each listing.`;
 
-  console.log(`NirnAI: Sending ${allListings.length} listings to /compare/start...`);
+  console.log(`NirnAI: Sending ${finalListings.length} listings to /compare/start...`);
+  // Log FULL listing details for debugging cross-site distribution
+  for (const l of finalListings) {
+    console.log(`NirnAI: → [${(l as any).source_site || "?"}] "${(l as any).title?.slice(0,60) || "no title"}" | price=${(l as any).price || "none"} | url=${(l as any).url?.slice(0,80) || "none"}`);
+  }
 
-  startCompare(allListings, crossSiteContext)
+  startCompare(finalListings, crossSiteContext)
     .then((result) => {
       const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
       console.log(`NirnAI: /compare/start returned — navigating to ${compareUrl}`);
@@ -1067,6 +1123,10 @@ chrome.runtime.onMessage.addListener(
         const latencyMs = Date.now() - activeCrossSite.startTime;
 
         console.log(`NirnAI: RECEIVED ${listings.length} listings from ${siteName} (tab ${senderTabId}) after ${(latencyMs/1000).toFixed(1)}s`);
+        // Log individual listing details for debugging
+        for (const l of listings) {
+          console.log(`NirnAI: ← [${siteName}] "${(l as any).title?.slice(0,60) || "no title"}" | src=${(l as any).source_site || "?"} | price=${(l as any).price || "none"} | url=${(l as any).url?.slice(0,80) || "none"}`);
+        }
 
         // Clear this tab's per-site timeout
         const siteTimer = activeCrossSite.perSiteTimers.get(senderTabId);

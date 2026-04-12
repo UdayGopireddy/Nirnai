@@ -134,11 +134,52 @@ export class GoogleTravelExtractor implements SiteExtractor {
 
   extractProduct(): ProductData {
     const jsonLd = getJsonLd();
-    const title = getMeta("og:title") || jsonLd?.name || extractText(['h1', 'h2.hotel-name', '[jsname="CJlqef"]']);
-    const price = jsonLd?.offers?.price?.toString() || extractText(['[data-price]', '.price', '[jsname="TjNFJd"]']);
-    const rating = jsonLd?.aggregateRating?.ratingValue?.toString() || extractText(['[aria-label*="star"]', '.rating']);
-    const reviewCount = jsonLd?.aggregateRating?.reviewCount?.toString() || extractText(['[aria-label*="review"]', '.review-count']);
-    const imageUrl = getMeta("og:image") || jsonLd?.image || document.querySelector<HTMLImageElement>('img.hotel-image, .gallery img')?.src || "";
+    const title = getMeta("og:title") || jsonLd?.name || extractText(['h1', 'h2', '[role="heading"]']);
+
+    // ── Price ──
+    let price = jsonLd?.offers?.price?.toString() || "";
+    if (!price) price = extractText(['[data-price]', '[class*="price"]']);
+    if (!price) {
+      for (const el of document.querySelectorAll('span, div')) {
+        const t = el.textContent?.trim() || "";
+        if (/^\$\d[\d,]*$/.test(t) && t.length < 15) { price = t; break; }
+      }
+    }
+
+    // ── Rating ──
+    let rating = jsonLd?.aggregateRating?.ratingValue?.toString() || "";
+    if (!rating) {
+      // Google Travel uses aria-label on star elements
+      const ratingEl = document.querySelector('[aria-label*="star"], [aria-label*="rating"], [aria-label*="rated"]');
+      if (ratingEl) {
+        const ariaLabel = ratingEl.getAttribute('aria-label') || "";
+        const rMatch = ariaLabel.match(/([\d.]+)/);
+        if (rMatch) rating = rMatch[1];
+      }
+    }
+    if (!rating) {
+      const body = document.body.innerText || "";
+      const rMatch = body.match(/(\d+\.?\d*)\s*(?:\/\s*5|out of 5|stars?)/i);
+      if (rMatch) rating = rMatch[1];
+    }
+
+    // ── Review count ──
+    let reviewCount = jsonLd?.aggregateRating?.reviewCount?.toString() || "";
+    if (!reviewCount) {
+      const ratingEl = document.querySelector('[aria-label*="review"]');
+      if (ratingEl) {
+        const ariaLabel = ratingEl.getAttribute('aria-label') || "";
+        const revMatch = ariaLabel.match(/([\d,]+)\s*reviews?/i);
+        if (revMatch) reviewCount = revMatch[1];
+      }
+    }
+    if (!reviewCount) {
+      const body = document.body.innerText || "";
+      const revMatch = body.match(/([\d,]+)\s*(?:Google )?reviews?/i);
+      if (revMatch) reviewCount = revMatch[1];
+    }
+
+    const imageUrl = getMeta("og:image") || jsonLd?.image || document.querySelector<HTMLImageElement>('img[src*="lh"], img[src*="photo"], .gallery img')?.src || "";
     return {
       title, brand: "", price, currency: "USD", rating, reviewCount,
       seller: "Google Travel", fulfiller: "Google Travel",

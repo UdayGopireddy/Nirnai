@@ -368,11 +368,45 @@ export class AirbnbExtractor implements SiteExtractor {
       }
     }
 
-    // Broader search for price near "night" text
+    // Broader search for price near "night" text — single span contains both
     const allSpans = document.querySelectorAll('span');
     for (const span of allSpans) {
       const text = span.textContent?.trim() || "";
       if (text.match(/[\$€£₹¥]\s*[\d,]+/) && text.toLowerCase().includes("night")) {
+        return text;
+      }
+    }
+
+    // Airbnb often renders "$288" in one span and "for 3 nights" in a sibling —
+    // look for a price span whose parent container mentions "night(s)"
+    for (const span of allSpans) {
+      const text = span.textContent?.trim() || "";
+      if (/^[\$€£₹¥]\s*[\d,]+$/.test(text)) {
+        // Check parent and siblings for "night" context
+        const parent = span.closest('[data-testid]') || span.parentElement?.parentElement;
+        const parentText = parent?.textContent?.toLowerCase() || "";
+        if (parentText.includes("night") || parentText.includes("total")) {
+          return text + (parentText.includes("night") ? " (total)" : "");
+        }
+      }
+    }
+
+    // Look for "total before taxes" or "$X total" pattern
+    for (const span of allSpans) {
+      const text = span.textContent?.trim() || "";
+      if (text.match(/[\$€£₹¥]\s*[\d,]+/) && text.toLowerCase().includes("total")) {
+        return text;
+      }
+    }
+
+    // Last resort: find any price-like span inside the booking sidebar
+    // The sidebar is typically a <div> that's position:sticky on the right
+    const bookingSections = document.querySelectorAll(
+      'form span, [data-plugin-in-point-id="BOOK_IT_SIDEBAR"] span, [data-section-id="BOOK_IT_SIDEBAR"] span'
+    );
+    for (const el of bookingSections) {
+      const text = el.textContent?.trim() || "";
+      if (/^[\$€£₹¥]\s*[\d,]+$/.test(text)) {
         return text;
       }
     }
@@ -727,36 +761,69 @@ export class AirbnbExtractor implements SiteExtractor {
    */
   private extractLocation(): string {
     const locationRegex = /in\s+([A-Za-z\s.'-]+,\s*[A-Za-z\s.'-]+)/i;
+    // Simpler pattern: "in CityName" (no comma required)
+    const cityOnlyRegex = /(?:home|house|apartment|condo|suite|villa|cabin|cottage|loft|studio|room|place|stay|rental|retreat|resort)\s+in\s+([A-Z][A-Za-z\s.'-]{2,30}?)(?:\s*[-–—·|,]|\.\s|$)/i;
+    const inCityRegex = /\bin\s+([A-Z][A-Za-z\s.'-]+?)(?:,\s*[A-Z][A-Za-z\s.'-]+)?(?:\s*[-–—·|]|\.\s|$)/;
+
+    // 0. JSON-LD address (most reliable)
+    const jsonLd = getJsonLd();
+    if (jsonLd?.address) {
+      const addr = jsonLd.address;
+      if (typeof addr === "object") {
+        const city = addr.addressLocality || "";
+        const region = addr.addressRegion || "";
+        const country = addr.addressCountry || "";
+        if (city) return region ? `${city}, ${region}` : country ? `${city}, ${country}` : city;
+      }
+      if (typeof addr === "string" && addr.length > 2) return addr;
+    }
+    // JSON-LD location.address
+    if (jsonLd?.location?.address) {
+      const addr = jsonLd.location.address;
+      if (typeof addr === "object") {
+        const city = addr.addressLocality || "";
+        const region = addr.addressRegion || "";
+        if (city) return region ? `${city}, ${region}` : city;
+      }
+      if (typeof addr === "string" && addr.length > 2) return addr;
+    }
 
     // 1. Check the property type line below the title: "Entire home in Tampa, Florida"
-    //    This is typically an h2 or a separate section from the title
     const overviewSection = document.querySelector('[data-section-id="OVERVIEW_DEFAULT"]');
     if (overviewSection) {
-      const match = overviewSection.textContent?.match(locationRegex);
+      const text = overviewSection.textContent || "";
+      const match = text.match(locationRegex);
       if (match) return match[1].trim();
+      // Try city-only: "Entire home in Tampa"
+      const cityMatch = text.match(cityOnlyRegex) || text.match(inCityRegex);
+      if (cityMatch) return cityMatch[1].trim();
     }
 
     // 2. Check all h2 elements (the subtitle "Entire guest suite in Tampa, Florida")
     const h2s = document.querySelectorAll('h2');
     for (const h2 of h2s) {
-      const match = h2.textContent?.match(locationRegex);
+      const text = h2.textContent || "";
+      const match = text.match(locationRegex);
       if (match) return match[1].trim();
+      const cityMatch = text.match(cityOnlyRegex) || text.match(inCityRegex);
+      if (cityMatch) return cityMatch[1].trim();
     }
 
-    // 3. Check the title section (works when title IS "Entire home in Tampa, Florida")
+    // 3. Check the title section
     const titleSection = document.querySelector('[data-section-id="TITLE_DEFAULT"]');
     if (titleSection) {
-      const match = titleSection.textContent?.match(locationRegex);
+      const text = titleSection.textContent || "";
+      const match = text.match(locationRegex);
       if (match) return match[1].trim();
+      const cityMatch = text.match(cityOnlyRegex) || text.match(inCityRegex);
+      if (cityMatch) return cityMatch[1].trim();
     }
 
     // 4. Check breadcrumb/navigation
     const breadcrumbs = document.querySelectorAll('nav a, [data-testid="breadcrumb"] a');
     for (const crumb of breadcrumbs) {
       const text = crumb.textContent?.trim() || "";
-      // Breadcrumbs often have just the city name
       if (text.length > 2 && text.length < 40 && !text.includes("Airbnb") && !text.includes("Home")) {
-        // Check if it looks like a location
         if (/^[A-Z][a-z]/.test(text)) return text;
       }
     }
@@ -766,7 +833,6 @@ export class AirbnbExtractor implements SiteExtractor {
     if (ogTitle) {
       const match = ogTitle.match(locationRegex);
       if (match) return match[1].trim();
-      // Also try "in City" without state
       const cityMatch = ogTitle.match(/in\s+([A-Z][A-Za-z\s.'-]+?)(?:\s*[-–—|]|$)/);
       if (cityMatch) return cityMatch[1].trim();
     }
@@ -775,11 +841,29 @@ export class AirbnbExtractor implements SiteExtractor {
     const docTitle = document.title || "";
     const titleMatch = docTitle.match(locationRegex);
     if (titleMatch) return titleMatch[1].trim();
+    const docCityMatch = docTitle.match(/in\s+([A-Z][A-Za-z\s.'-]+?)(?:\s*[-–—|,·]|$)/);
+    if (docCityMatch) return docCityMatch[1].trim();
 
     // 7. Scan the first 5000 chars of visible body text for "City, State" patterns near "in"
     const bodySnippet = document.body.innerText?.slice(0, 5000) || "";
     const bodyMatch = bodySnippet.match(locationRegex);
     if (bodyMatch) return bodyMatch[1].trim();
+
+    // 8. Try __NEXT_DATA__ (Airbnb's Next.js data)
+    try {
+      const nextScript = document.getElementById("__NEXT_DATA__");
+      if (nextScript) {
+        const nextData = JSON.parse(nextScript.textContent || "");
+        // Walk common paths for location data
+        const listing = nextData?.props?.pageProps?.listingData?.listing
+          ?? nextData?.props?.pageProps?.listing
+          ?? null;
+        if (listing) {
+          const city = listing.city || listing.locationTitle || listing.smartLocation || "";
+          if (city) return city;
+        }
+      }
+    } catch { /* ignore */ }
 
     return "";
   }
@@ -851,6 +935,7 @@ export class AirbnbExtractor implements SiteExtractor {
   }
 
   getSearchCenter(): SearchCenter | null {
+    // 1. Try map bounds from URL params (search pages)
     const bounds = this.getMapBounds();
     if (bounds) {
       return {
@@ -858,6 +943,45 @@ export class AirbnbExtractor implements SiteExtractor {
         lng: (bounds.ne.lng + bounds.sw.lng) / 2,
       };
     }
+
+    // 2. JSON-LD geo coordinates (product pages)
+    const jsonLd = getJsonLd();
+    if (jsonLd?.geo) {
+      const lat = parseFloat(jsonLd.geo.latitude);
+      const lng = parseFloat(jsonLd.geo.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+    }
+    if (jsonLd?.location?.geo) {
+      const lat = parseFloat(jsonLd.location.geo.latitude);
+      const lng = parseFloat(jsonLd.location.geo.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+    }
+
+    // 3. __NEXT_DATA__ listing coordinates (Airbnb's internal data)
+    try {
+      const nextScript = document.getElementById("__NEXT_DATA__");
+      if (nextScript) {
+        const nextData = JSON.parse(nextScript.textContent || "");
+        const listing = nextData?.props?.pageProps?.listingData?.listing
+          ?? nextData?.props?.pageProps?.listing
+          ?? null;
+        if (listing) {
+          const lat = parseFloat(listing.lat ?? listing.latitude ?? "");
+          const lng = parseFloat(listing.lng ?? listing.longitude ?? "");
+          if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+        }
+      }
+    } catch { /* ignore */ }
+
+    // 4. Meta tag geo coordinates
+    const geoLat = getMeta("place:location:latitude") || getMeta("geo.position")?.split(";")[0];
+    const geoLng = getMeta("place:location:longitude") || getMeta("geo.position")?.split(";")[1];
+    if (geoLat && geoLng) {
+      const lat = parseFloat(geoLat);
+      const lng = parseFloat(geoLng);
+      if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+    }
+
     return null;
   }
 

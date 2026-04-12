@@ -37,7 +37,17 @@ FOOD_CATEGORIES = [
 
 
 def is_food_product(product: ProductData) -> bool:
-    """Determine if product is food/consumable."""
+    """Determine if product is food/consumable. Hospitality listings are never food."""
+    # Hospitality sites never have food products
+    from domain_classifier import classify_domain, ScoringDomain
+    domain = classify_domain(
+        getattr(product, 'source_site', ''),
+        getattr(product, 'category', ''),
+        getattr(product, 'title', ''),
+    )
+    if domain == ScoringDomain.HOSPITALITY:
+        return False
+
     if product.ingredients or product.nutritionInfo:
         return True
 

@@ -158,6 +158,7 @@ async def _handle_url_analysis(sender: str, url: str) -> None:
             health_breakdown=health_breakdown,
             review_trust=review_trust,
             risk_flags=risk_flags,
+            product=product,
         )
         confidence = compute_confidence(product, review_trust, purchase_score)
 
