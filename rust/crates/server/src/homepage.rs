@@ -984,7 +984,8 @@ footer {{
 </section>
 
 <footer>
-  NirnAI — Clear decisions. Every purchase. · Not affiliated with any marketplace.
+  NirnAI — Clear decisions. Every purchase.
+  <div style="font-size:9px;opacity:0.6;margin-top:4px;">As a Booking.com Affiliate, NirnAI earns from qualifying transactions. This does not affect our rankings.</div>
 </footer>
 
 <!-- Processing overlay -->
@@ -1449,7 +1450,11 @@ function affiliateUrl(url) {{
       vrbo:        '{vrbo_aff}',
       tripadvisor: '{tripadvisor_aff}',
     }};
-    if (h.includes('booking') && AFF.booking)     u.searchParams.set('aid', AFF.booking);
+    if (h.includes('booking') && AFF.booking) {{
+      u.searchParams.set('utm_source', 'nirnai');
+      u.searchParams.set('utm_medium', 'referral');
+      return 'https://www.awin1.com/cread.php?awinmid=6776&awinaffid=' + AFF.booking + '&ued=' + encodeURIComponent(u.toString());
+    }}
     if (h.includes('amazon') && AFF.amazon)        u.searchParams.set('tag', AFF.amazon);
     if (h.includes('expedia') && AFF.expedia)      u.searchParams.set('affcid', AFF.expedia);
     if (h.includes('hotels.com') && AFF['hotels.com']) u.searchParams.set('rffrid', AFF['hotels.com']);

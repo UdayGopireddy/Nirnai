@@ -5,7 +5,9 @@ use axum::routing::{get, post};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 
+mod clicks;
 mod compare;
+mod dynamo;
 mod homepage;
 mod intent;
 mod inventory;
@@ -25,13 +27,17 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let session_store = compare::new_session_store();
-    let inventory = inventory::new_inventory()
-        .expect("Failed to initialize inventory database");
+    // Initialize shared DynamoDB client
+    let dynamo_client = dynamo::new_client().await;
+
+    let session_store = compare::SessionStore::new(dynamo_client.clone());
+    let inventory = inventory::Inventory::new(dynamo_client.clone());
+    let click_tracker = clicks::ClickTracker::new(dynamo_client);
 
     let state = compare::NirnaiState {
         sessions: session_store,
         inventory,
+        clicks: click_tracker,
     };
 
     let app = Router::new()
@@ -49,6 +55,7 @@ async fn main() {
         .route("/intent/search", post(intent::intent_search))
         .route("/intent/compare", post(intent::intent_compare))
         .route("/listings/search", get(inventory::search_inventory))
+        .route("/track/click", post(clicks::track_click))
         .route("/health", get(nirnai::health_check))
         .with_state(state)
         .layer(cors);

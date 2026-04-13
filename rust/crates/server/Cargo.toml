@@ -12,7 +12,8 @@ axum = "0.8"
 runtime = { path = "../runtime" }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
-rusqlite = { version = "0.33", features = ["bundled"] }
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-dynamodb = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "time"] }
 tools = { path = "../tools" }
 tower-http = { version = "0.6", features = ["cors"] }

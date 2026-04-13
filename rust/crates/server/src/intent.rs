@@ -30,12 +30,34 @@ pub fn affiliate_url(base: &str, platform: &str) -> String {
     let sep = if base.contains('?') { "&" } else { "?" };
     let mut params: Vec<String> = Vec::new();
 
+    // Simple percent-encoding for URL embedding
+    fn urlencoding_encode(s: &str) -> String {
+        let mut out = String::with_capacity(s.len() * 3);
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(b as char);
+                }
+                _ => {
+                    out.push_str(&format!("%{:02X}", b));
+                }
+            }
+        }
+        out
+    }
+
     // Platform-specific affiliate params
     let plat = platform.to_lowercase();
     match plat.as_str() {
         "booking" | "booking.com" => {
             if let Ok(aid) = std::env::var("NIRNAI_AFF_BOOKING") {
-                params.push(format!("aid={}", aid));
+                // Awin redirect wrapper for Booking.com
+                let enriched = format!("{}{}{}", base, sep, "utm_source=nirnai&utm_medium=referral");
+                return format!(
+                    "https://www.awin1.com/cread.php?awinmid=6776&awinaffid={}&ued={}",
+                    aid,
+                    urlencoding_encode(&enriched)
+                );
             }
         }
         "amazon" => {

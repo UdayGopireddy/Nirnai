@@ -1,23 +1,21 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
+use aws_sdk_dynamodb::types::AttributeValue;
 use axum::extract::{FromRef, Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::Mutex;
 
+use crate::clicks::ClickTracker;
 use crate::inventory::{self, Inventory};
 use crate::nirnai::{
     self, BatchResponse, ProductData,
 };
 use crate::proxy;
 
-// ── Session store ──
+// ── Session store (DynamoDB) ──
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompareSession {
     pub id: String,
     pub status: SessionStatus,
@@ -38,10 +36,75 @@ pub enum SessionStatus {
     Error,
 }
 
-pub type SessionStore = Arc<Mutex<HashMap<String, CompareSession>>>;
+const SESSIONS_TABLE: &str = "nirnai-sessions";
+const SESSION_TTL_SECS: u64 = 86400; // 24 hours
 
-pub fn new_session_store() -> SessionStore {
-    Arc::new(Mutex::new(HashMap::new()))
+#[derive(Clone)]
+pub struct SessionStore {
+    client: aws_sdk_dynamodb::Client,
+}
+
+impl SessionStore {
+    pub fn new(client: aws_sdk_dynamodb::Client) -> Self {
+        Self { client }
+    }
+
+    pub async fn put(&self, session: &CompareSession) -> Result<(), String> {
+        let data = serde_json::to_string(session)
+            .map_err(|e| format!("serialize session: {e}"))?;
+        let ttl = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + SESSION_TTL_SECS;
+
+        self.client
+            .put_item()
+            .table_name(SESSIONS_TABLE)
+            .item("id", AttributeValue::S(session.id.clone()))
+            .item("data", AttributeValue::S(data))
+            .item("ttl", AttributeValue::N(ttl.to_string()))
+            .send()
+            .await
+            .map_err(|e| format!("DynamoDB put session: {e}"))?;
+        Ok(())
+    }
+
+    pub async fn get(&self, id: &str) -> Result<Option<CompareSession>, String> {
+        let resp = self
+            .client
+            .get_item()
+            .table_name(SESSIONS_TABLE)
+            .key("id", AttributeValue::S(id.to_string()))
+            .send()
+            .await
+            .map_err(|e| format!("DynamoDB get session: {e}"))?;
+
+        match resp.item {
+            Some(item) => {
+                let data = item
+                    .get("data")
+                    .and_then(|v| v.as_s().ok())
+                    .ok_or("missing data attribute")?;
+                let session: CompareSession = serde_json::from_str(data)
+                    .map_err(|e| format!("deserialize session: {e}"))?;
+                Ok(Some(session))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn exists(&self, id: &str) -> bool {
+        self.client
+            .get_item()
+            .table_name(SESSIONS_TABLE)
+            .key("id", AttributeValue::S(id.to_string()))
+            .projection_expression("id")
+            .send()
+            .await
+            .map(|r| r.item.is_some())
+            .unwrap_or(false)
+    }
 }
 
 // ── Combined app state ──
@@ -50,6 +113,7 @@ pub fn new_session_store() -> SessionStore {
 pub struct NirnaiState {
     pub sessions: SessionStore,
     pub inventory: Inventory,
+    pub clicks: ClickTracker,
 }
 
 impl FromRef<NirnaiState> for SessionStore {
@@ -61,6 +125,12 @@ impl FromRef<NirnaiState> for SessionStore {
 impl FromRef<NirnaiState> for Inventory {
     fn from_ref(state: &NirnaiState) -> Self {
         state.inventory.clone()
+    }
+}
+
+impl FromRef<NirnaiState> for ClickTracker {
+    fn from_ref(state: &NirnaiState) -> Self {
+        state.clicks.clone()
     }
 }
 
@@ -104,10 +174,7 @@ pub async fn create_compare_session(
         error: None,
     };
 
-    {
-        let mut sessions = store.lock().await;
-        sessions.insert(id.clone(), session);
-    }
+    store.put(&session).await.map_err(|e| format!("Failed to save session: {e}"))?;
 
     // Kick off async analysis
     let store_clone = store.clone();
@@ -132,49 +199,43 @@ pub async fn create_compare_session(
 
     tokio::spawn(async move {
         // Mark as analyzing
-        {
-            let mut sessions = store_clone.lock().await;
-            if let Some(s) = sessions.get_mut(&id_clone) {
-                s.status = SessionStatus::Analyzing;
-            }
+        if let Ok(Some(mut s)) = store_clone.get(&id_clone).await {
+            s.status = SessionStatus::Analyzing;
+            let _ = store_clone.put(&s).await;
         }
 
         // Run analysis (reuse the existing analyze_batch logic)
         let result = analyze_batch_internal(listings, search_context).await;
 
         // Store result
-        {
-            let mut sessions = store_clone.lock().await;
-            if let Some(s) = sessions.get_mut(&id_clone) {
-                match result {
-                    Ok(batch) => {
-                        // Persist ranked listings to inventory
-                        let geo = inventory::parse_geo_context(&context_for_geo, &platform_label);
-                        tracing::info!(
-                            "Saving {} rankings to inventory — destination: {:?}, platform: {}, lat: {:?}, lng: {:?}",
-                            batch.ranked.len(), geo.destination, geo.platform, geo.lat, geo.lng
-                        );
-                        if let Ok(inv) = inventory_clone.lock() {
-                            match inv.save_rankings(
-                                &id_clone,
-                                &batch.ranked,
-                                &batch.comparison_summary,
-                                &geo,
-                            ) {
-                                Ok(count) => tracing::info!("Saved {count} rankings to inventory for session {}", &id_clone),
-                                Err(e) => tracing::warn!("Failed to save rankings to inventory: {e}"),
-                            }
-                        }
+        if let Ok(Some(mut s)) = store_clone.get(&id_clone).await {
+            match result {
+                Ok(batch) => {
+                    // Persist ranked listings to inventory
+                    let geo = inventory::parse_geo_context(&context_for_geo, &platform_label);
+                    tracing::info!(
+                        "Saving {} rankings to inventory — destination: {:?}, platform: {}, lat: {:?}, lng: {:?}",
+                        batch.ranked.len(), geo.destination, geo.platform, geo.lat, geo.lng
+                    );
+                    match inventory_clone.save_rankings(
+                        &id_clone,
+                        &batch.ranked,
+                        &batch.comparison_summary,
+                        &geo,
+                    ).await {
+                        Ok(count) => tracing::info!("Saved {count} rankings to inventory for session {}", &id_clone),
+                        Err(e) => tracing::warn!("Failed to save rankings to inventory: {e}"),
+                    }
 
-                        s.result = Some(batch);
-                        s.status = SessionStatus::Done;
-                    }
-                    Err(e) => {
-                        s.error = Some(e);
-                        s.status = SessionStatus::Error;
-                    }
+                    s.result = Some(batch);
+                    s.status = SessionStatus::Done;
+                }
+                Err(e) => {
+                    s.error = Some(e);
+                    s.status = SessionStatus::Error;
                 }
             }
+            let _ = store_clone.put(&s).await;
         }
     });
 
@@ -200,13 +261,7 @@ pub async fn compare_page(
     Path(id): Path<String>,
     State(store): State<SessionStore>,
 ) -> impl IntoResponse {
-    // Validate session exists
-    let exists = {
-        let sessions = store.lock().await;
-        sessions.contains_key(&id)
-    };
-
-    if !exists {
+    if !store.exists(&id).await {
         return (
             StatusCode::NOT_FOUND,
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -227,12 +282,15 @@ pub async fn compare_status(
     Path(id): Path<String>,
     State(store): State<SessionStore>,
 ) -> Result<Json<CompareSession>, (StatusCode, Json<serde_json::Value>)> {
-    let sessions = store.lock().await;
-    match sessions.get(&id) {
-        Some(session) => Ok(Json(session.clone())),
-        None => Err((
+    match store.get(&id).await {
+        Ok(Some(session)) => Ok(Json(session)),
+        Ok(None) => Err((
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "session not found" })),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
         )),
     }
 }
@@ -648,10 +706,14 @@ fn build_compare_html(session_id: &str) -> String {
 
     /* ── Footer ── */
     .footer {{
-      text-align: center; padding: 36px 0 16px;
+      text-align: center; padding: 36px 0 8px;
       font-size: 11px; color: var(--text-muted); letter-spacing: 0.3px;
     }}
     .footer .heart {{ color: var(--accent); }}
+    .affiliate-disclosure {{
+      text-align: center; padding: 4px 0 16px;
+      font-size: 9px; color: var(--text-muted); opacity: 0.7;
+    }}
 
     /* ── Responsive ── */
     @media (max-width: 600px) {{
@@ -814,7 +876,12 @@ fn build_compare_html(session_id: &str) -> String {
       try {{
         const u = new URL(enriched);
         const h = u.hostname.toLowerCase();
-        if (h.includes('booking') && NIRNAI_AFF.booking)     u.searchParams.set('aid', NIRNAI_AFF.booking);
+        // Booking.com → Awin redirect wrapper (proper affiliate tracking)
+        if (h.includes('booking') && NIRNAI_AFF.booking) {{
+          u.searchParams.set('utm_source', 'nirnai');
+          u.searchParams.set('utm_medium', 'referral');
+          return 'https://www.awin1.com/cread.php?awinmid=6776&awinaffid=' + NIRNAI_AFF.booking + '&ued=' + encodeURIComponent(u.toString());
+        }}
         if (h.includes('amazon') && NIRNAI_AFF.amazon)        u.searchParams.set('tag', NIRNAI_AFF.amazon);
         if (h.includes('expedia') && NIRNAI_AFF.expedia)      u.searchParams.set('affcid', NIRNAI_AFF.expedia);
         if (h.includes('hotels.com') && NIRNAI_AFF['hotels.com']) u.searchParams.set('rffrid', NIRNAI_AFF['hotels.com']);
@@ -830,6 +897,54 @@ fn build_compare_html(session_id: &str) -> String {
         return u.toString();
       }} catch {{ return url; }}
     }}
+
+    // ── Click tracking ──
+    function detectPlatform(url) {{
+      try {{
+        const h = new URL(url).hostname.toLowerCase();
+        if (h.includes('booking')) return 'booking';
+        if (h.includes('airbnb')) return 'airbnb';
+        if (h.includes('expedia')) return 'expedia';
+        if (h.includes('vrbo')) return 'vrbo';
+        if (h.includes('hotels.com')) return 'hotels';
+        if (h.includes('agoda')) return 'agoda';
+        if (h.includes('tripadvisor')) return 'tripadvisor';
+        if (h.includes('amazon')) return 'amazon';
+        if (h.includes('awin1.com')) return 'booking'; // Awin redirect
+        return h;
+      }} catch {{ return ''; }}
+    }}
+    function hasAffiliate(url) {{
+      return url.includes('awin1.com') || url.includes('aid=') || url.includes('tag=') ||
+             url.includes('affcid=') || url.includes('rffrid=') || url.includes('campid=') ||
+             url.includes('affid=') || url.includes('CampaignId=');
+    }}
+    document.addEventListener('click', function(e) {{
+      const a = e.target.closest('a[href]');
+      if (!a) return;
+      const href = a.href;
+      // Only track outbound links (not same-page anchors)
+      if (!href.startsWith('http') || href.includes(window.location.hostname)) return;
+      // Find listing rank if available
+      const card = a.closest('.runner, .hero');
+      const rankEl = card && card.querySelector('[data-rank]');
+      const rank = rankEl ? parseInt(rankEl.dataset.rank) : (card && card.classList.contains('hero') ? 1 : null);
+      const titleEl = card && card.querySelector('.hero-title a, .runner-title a');
+      const title = titleEl ? titleEl.textContent.trim() : '';
+      // Fire and forget
+      fetch('/track/click', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{
+          session_id: SESSION_ID,
+          url: href,
+          platform: detectPlatform(href),
+          listing_title: title,
+          listing_rank: rank,
+          is_affiliate: hasAffiliate(href),
+        }}),
+      }}).catch(() => {{}});
+    }});
 
     function parsePriceNum(s) {{
       if (!s) return null;
@@ -1082,6 +1197,7 @@ fn build_compare_html(session_id: &str) -> String {
       </div>`;
 
       html += `<div class="footer">NirnAI <span class="heart">·</span> Clear decisions. Every purchase.</div>`;
+      html += `<div class="affiliate-disclosure">As a Booking.com Affiliate, NirnAI earns from qualifying transactions. This does not affect our rankings.</div>`;
       app.innerHTML = html;
     }}
 
@@ -1138,10 +1254,8 @@ pub async fn analyze_with_inventory(
 
     // Save green-stamp products (purchase_score >= 75) to inventory as NirnAI-verified
     if result.purchase_score >= 75 {
-        if let Ok(inv) = state.inventory.lock() {
-            if let Err(e) = inv.save_verified_listing(&product, &result) {
-                tracing::warn!("Failed to save verified listing to inventory: {e}");
-            }
+        if let Err(e) = state.inventory.save_verified_listing(&product, &result).await {
+            tracing::warn!("Failed to save verified listing to inventory: {e}");
         }
     }
 
