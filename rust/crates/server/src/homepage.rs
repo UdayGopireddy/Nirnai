@@ -763,7 +763,7 @@ footer {{
   </a>
   <div class="nav-links">
     <a href="#how-it-works">How it works</a>
-    <a href="https://chromewebstore.google.com" target="_blank" class="nav-cta">Get Extension</a>
+    <a href="https://chromewebstore.google.com/detail/nirnai/jblgkijijhjlbkhijphinffldkmpjpli" target="_blank" class="nav-cta">Get Extension</a>
   </div>
 </nav>
 
@@ -985,6 +985,7 @@ footer {{
 
 <footer>
   NirnAI — Clear decisions. Every purchase.
+  <div style="margin-top:8px;font-size:11px;"><a href="/privacy" style="color:#7eb8da;text-decoration:none;">Privacy Policy</a> · <a href="/support" style="color:#7eb8da;text-decoration:none;">Support</a></div>
   <div style="font-size:9px;opacity:0.6;margin-top:4px;">As a Booking.com Affiliate, NirnAI earns from qualifying transactions. This does not affect our rankings.</div>
 </footer>
 
@@ -1608,7 +1609,7 @@ function buildSearchGuideHTML(guide, query, hasInventory, checkin, checkout, gue
           and rank them so you get the best deal with full confidence.
           <br><br>
           <strong style="color:#60a5fa;">Don't have the extension?</strong>
-          <a href="https://chromewebstore.google.com" target="_blank" rel="noopener"
+          <a href="https://chromewebstore.google.com/detail/nirnai/jblgkijijhjlbkhijphinffldkmpjpli" target="_blank" rel="noopener"
              style="color:#f59e0b; text-decoration:underline;">Install NirnAI for Chrome</a>
           to unlock live cross-platform rankings.
         </div>

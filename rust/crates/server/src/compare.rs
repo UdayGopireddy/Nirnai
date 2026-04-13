@@ -1197,6 +1197,7 @@ fn build_compare_html(session_id: &str) -> String {
       </div>`;
 
       html += `<div class="footer">NirnAI <span class="heart">·</span> Clear decisions. Every purchase.</div>`;
+      html += `<div style="text-align:center;margin-top:8px;font-size:11px;"><a href="/privacy" style="color:#7eb8da;text-decoration:none;">Privacy Policy</a> · <a href="/support" style="color:#7eb8da;text-decoration:none;">Support</a></div>`;
       html += `<div class="affiliate-disclosure">As a Booking.com Affiliate, NirnAI earns from qualifying transactions. This does not affect our rankings.</div>`;
       app.innerHTML = html;
     }}

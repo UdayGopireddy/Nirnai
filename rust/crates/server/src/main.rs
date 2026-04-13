@@ -12,6 +12,7 @@ mod homepage;
 mod intent;
 mod inventory;
 mod nirnai;
+mod pages;
 mod proxy;
 mod scraper;
 
@@ -56,6 +57,8 @@ async fn main() {
         .route("/intent/compare", post(intent::intent_compare))
         .route("/listings/search", get(inventory::search_inventory))
         .route("/track/click", post(clicks::track_click))
+        .route("/privacy", get(pages::privacy))
+        .route("/support", get(pages::support))
         .route("/health", get(nirnai::health_check))
         .with_state(state)
         .layer(cors);
