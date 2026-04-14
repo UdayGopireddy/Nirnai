@@ -35,6 +35,17 @@ FOOD_CATEGORIES = [
     "supplement", "protein", "vitamin",
 ]
 
+# Categories that are personal care
+PERSONAL_CARE_CATEGORIES = [
+    "shampoo", "conditioner", "skincare", "skin care", "soap",
+    "lotion", "moisturizer", "sunscreen", "toothpaste", "deodorant",
+    "cosmetic", "makeup", "hair care", "haircare", "body wash",
+    "face wash", "cleanser", "serum", "cream", "beauty",
+    "personal care", "hair color", "hair dye", "lip", "nail",
+    "bath", "fragrance", "perfume", "cologne",
+    "repair", "restore", "bond", "maintenance",  # common in premium hair care
+]
+
 
 def is_food_product(product: ProductData) -> bool:
     """Determine if product is food/consumable. Hospitality listings are never food."""
@@ -57,6 +68,26 @@ def is_food_product(product: ProductData) -> bool:
     return any(
         kw in category_lower or kw in title_lower
         for kw in FOOD_CATEGORIES
+    )
+
+
+def is_personal_care_product(product: ProductData) -> bool:
+    """Determine if product is personal care (shampoo, skincare, cosmetics, etc.)."""
+    from domain_classifier import classify_domain, ScoringDomain
+    domain = classify_domain(
+        getattr(product, 'source_site', ''),
+        getattr(product, 'category', ''),
+        getattr(product, 'title', ''),
+    )
+    if domain == ScoringDomain.HOSPITALITY:
+        return False
+
+    category_lower = product.category.lower()
+    title_lower = product.title.lower()
+
+    return any(
+        kw in category_lower or kw in title_lower
+        for kw in PERSONAL_CARE_CATEGORIES
     )
 
 
@@ -193,22 +224,54 @@ def calculate_health_score(
 ) -> tuple[int, HealthBreakdown]:
     """
     Calculate weighted health score.
-    Weights from PRD: Nutrition 50%, Ingredients 30%, Processing 20%
-    Returns 0 for non-food products.
+    Food: Nutrition 50%, Ingredients 30%, Processing 20%
+    Personal care: Ingredients 60%, Processing 25%, Nutrition 15% (as safety proxy)
+    Returns 0 for non-food AND non-personal-care products.
     """
-    if not is_food_product(product):
-        return 0, HealthBreakdown()
+    if is_food_product(product):
+        # Food: nutrition-heavy weights
+        breakdown = HealthBreakdown(
+            nutrition=score_nutrition(product),
+            ingredients=score_ingredients(product),
+            processing=score_processing(product),
+        )
 
-    breakdown = HealthBreakdown(
-        nutrition=score_nutrition(product),
-        ingredients=score_ingredients(product),
-        processing=score_processing(product),
-    )
+        total = (
+            breakdown.nutrition * 0.50
+            + breakdown.ingredients * 0.30
+            + breakdown.processing * 0.20
+        )
 
-    total = (
-        breakdown.nutrition * 0.50
-        + breakdown.ingredients * 0.30
-        + breakdown.processing * 0.20
-    )
+        return int(total), breakdown
 
-    return int(total), breakdown
+    if is_personal_care_product(product):
+        # Personal care: ingredient safety is the primary concern
+        breakdown = HealthBreakdown(
+            nutrition=50,  # neutral — not relevant for personal care
+            ingredients=score_ingredients(product),
+            processing=score_processing(product),
+        )
+        # For personal care without ingredient data, give a premium brand benefit
+        title_lower = product.title.lower()
+        brand_lower = (product.brand or "").lower()
+        premium_brands = [
+            "oribe", "kerastase", "kérastase", "olaplex", "moroccanoil",
+            "bumble and bumble", "aveda", "redken", "pureology", "living proof",
+            "ouai", "briogeo", "drunk elephant", "la mer", "sk-ii",
+            "estee lauder", "clinique", "sunday riley", "tatcha", "fresh",
+        ]
+        is_premium = any(b in title_lower or b in brand_lower for b in premium_brands)
+        if is_premium and not product.ingredients:
+            # Premium brands known for ingredient quality
+            breakdown.ingredients = 82
+            breakdown.processing = 75
+
+        total = (
+            breakdown.ingredients * 0.60
+            + breakdown.processing * 0.25
+            + breakdown.nutrition * 0.15
+        )
+        return int(total), breakdown
+
+    # Not food, not personal care
+    return 0, HealthBreakdown()

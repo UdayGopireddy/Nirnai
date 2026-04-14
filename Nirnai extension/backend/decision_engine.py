@@ -203,6 +203,17 @@ def generate_stamp(
             health_score, health_breakdown
         )
 
+    # Also check personal care health scoring
+    from health_scoring import is_personal_care_product
+    is_personal_care = is_personal_care_product(product) if product else False
+    if is_personal_care and health_score > 0:
+        health_positives, health_warnings, health_signal = _build_health_reasons(
+            health_score, health_breakdown
+        )
+        if health_score >= 80:
+            health_positives.append("Premium ingredient quality")
+            health_signal = "Premium ingredients justify the price"
+
     all_positives = purchase_positives + health_positives
     all_warnings = purchase_warnings + health_warnings
 
@@ -220,6 +231,23 @@ def generate_stamp(
         elif purchase_score >= 65 and health_score >= 55:
             stamp_type = "SMART_BUY"
             legacy = "BUY"
+        else:
+            stamp_type = "CHECK"
+            legacy = "NEUTRAL"
+    elif is_personal_care and health_score > 0:
+        # Premium quality override: high health_score elevates verdict
+        if health_score >= 80 and purchase_score >= 40:
+            stamp_type = "SMART_BUY"
+            legacy = "BUY"
+        elif health_score >= 60 and purchase_score >= 50:
+            stamp_type = "SMART_BUY"
+            legacy = "BUY"
+        elif purchase_score < 40 or (health_score > 0 and health_score < 30):
+            stamp_type = "AVOID"
+            legacy = "DON'T BUY"
+        elif purchase_score >= 40:
+            stamp_type = "CHECK"
+            legacy = "NEUTRAL"
         else:
             stamp_type = "CHECK"
             legacy = "NEUTRAL"

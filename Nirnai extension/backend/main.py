@@ -27,7 +27,7 @@ from models import (
 from typing import List, Optional
 from pydantic import BaseModel
 from purchase_scoring import calculate_purchase_score, detect_risk_flags
-from health_scoring import calculate_health_score, is_food_product
+from health_scoring import calculate_health_score, is_food_product, is_personal_care_product
 from decision_engine import generate_stamp, compute_confidence
 from ai_service import get_ai_summary, get_alternative_suggestion, _generate_fallback_summary
 
