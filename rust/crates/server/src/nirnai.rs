@@ -362,8 +362,13 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
 Scoring rules:
 - purchase_score: Weighted average of reviews (25%), price fairness (20%), seller trust (15%), return policy (10%), popularity (10%), specs/quality (10%), delivery (10%)
 - health_score: For food/supplements: nutrition (40%), ingredients safety (35%), processing level (25%). For personal care (shampoo, skincare, cosmetics, soap): ingredients safety (60%), allergen risk (25%), certifications (15%). For non-food AND non-personal-care items (electronics, clothing, furniture, etc.): set to 0 with health_signal "Not applicable".
-- decision: SMART_BUY if purchase_score >= 75 AND (health_score >= 60 OR health_score == 0). CHECK if purchase_score >= 40. AVOID if purchase_score < 40 OR (health_score > 0 AND health_score < 30).
+- decision logic:
+  1. SMART_BUY if purchase_score >= 75 AND (health_score >= 60 OR health_score == 0)
+  2. PREMIUM QUALITY OVERRIDE: For personal care / food / supplements, if health_score >= 80 then SMART_BUY even if purchase_score is 40-74. These are premium products where ingredient quality justifies the price. Label should be "Smart Buy" with purchase_signal like "Premium ingredients justify the price" or "Top-tier ingredient safety".
+  3. CHECK if purchase_score >= 40
+  4. AVOID if purchase_score < 40 OR (health_score > 0 AND health_score < 30)
 - IMPORTANT: health_score of 0 means "not applicable" — it must NEVER penalize the decision. Only a scored health_score below 30 should trigger AVOID.
+- IMPORTANT: For personal care products (shampoo, skincare, etc.), a high health_score is a STRONG positive signal — it means premium, safe ingredients. This should elevate the verdict, not be ignored.
 - confidence: How confident you are in the analysis (0.0-1.0). Lower if data is sparse.
 
 When rating is missing or "0", lower the review trust scores. When seller is unknown, moderate the seller score. Be honest and helpful."#.to_string()
@@ -608,6 +613,11 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
 - For non-food AND non-personal-care items (electronics, clothing, furniture, tools, etc.): Set health_score to 0 with health_signal "Not applicable".
 - health_score of 0 means "not applicable" — it must NEVER penalize the decision or stamp.
 - Only a scored health_score (> 0) below 30 should cause concern.
+
+PREMIUM QUALITY OVERRIDE:
+- For personal care / food / supplements: if health_score >= 80, the product has premium, safe ingredients. This ELEVATES the stamp to SMART_BUY even if purchase_score is 40-74.
+- Rationale: People buy premium shampoo, skincare, and supplements FOR ingredient quality. A high health_score validates the premium price.
+- When applying this override, include in positives: "Premium ingredient quality" and in purchase_signal: "Premium ingredients justify the price."
 
 ══════════════════════════════════════════════════════════════
   NirnAI RANKING PHILOSOPHY — OUTCOMES, NOT LISTINGS
