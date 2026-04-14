@@ -361,8 +361,9 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
 
 Scoring rules:
 - purchase_score: Weighted average of reviews (25%), price fairness (20%), seller trust (15%), return policy (10%), popularity (10%), specs/quality (10%), delivery (10%)
-- health_score: Only for food/supplements/personal care. nutrition (40%), ingredients safety (35%), processing level (25%). For non-food items, set to 0 with health_signal "Not applicable"
-- decision: SMART_BUY if purchase_score >= 75 AND health_score >= 60 (or non-food). AVOID if purchase_score < 40 OR health_score < 40. CHECK otherwise.
+- health_score: For food/supplements: nutrition (40%), ingredients safety (35%), processing level (25%). For personal care (shampoo, skincare, cosmetics, soap): ingredients safety (60%), allergen risk (25%), certifications (15%). For non-food AND non-personal-care items (electronics, clothing, furniture, etc.): set to 0 with health_signal "Not applicable".
+- decision: SMART_BUY if purchase_score >= 75 AND (health_score >= 60 OR health_score == 0). CHECK if purchase_score >= 40. AVOID if purchase_score < 40 OR (health_score > 0 AND health_score < 30).
+- IMPORTANT: health_score of 0 means "not applicable" — it must NEVER penalize the decision. Only a scored health_score below 30 should trigger AVOID.
 - confidence: How confident you are in the analysis (0.0-1.0). Lower if data is sparse.
 
 When rating is missing or "0", lower the review trust scores. When seller is unknown, moderate the seller score. Be honest and helpful."#.to_string()
@@ -597,6 +598,16 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
   ],
   "comparison_summary": "<2-3 sentences: who should buy/book #1, the key tradeoff with #2, and any to avoid. Use 'Buy' for shopping, 'Book' for travel.>"
 }
+
+══════════════════════════════════════════════════════════════
+  HEALTH SCORE RULES
+══════════════════════════════════════════════════════════════
+
+- For food/supplements: Score based on nutrition (40%), ingredients safety (35%), processing level (25%).
+- For personal care (shampoo, skincare, cosmetics, soap, toothpaste): Score based on ingredients safety (60%), allergen risk (25%), certifications (15%).
+- For non-food AND non-personal-care items (electronics, clothing, furniture, tools, etc.): Set health_score to 0 with health_signal "Not applicable".
+- health_score of 0 means "not applicable" — it must NEVER penalize the decision or stamp.
+- Only a scored health_score (> 0) below 30 should cause concern.
 
 ══════════════════════════════════════════════════════════════
   NirnAI RANKING PHILOSOPHY — OUTCOMES, NOT LISTINGS
