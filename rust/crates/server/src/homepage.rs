@@ -19,6 +19,7 @@ fn build_homepage_html() -> String {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name='impact-site-verification' value='99546464-b539-4922-a92f-344ec1e7c2b0'>
 <title>NirnAI — Clear decisions. Every purchase.</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
 <style>
