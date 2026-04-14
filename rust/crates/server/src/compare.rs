@@ -308,7 +308,7 @@ async fn analyze_batch_internal(
     let domain_context = if is_travel {
         "\n\nDOMAIN: TRAVEL/ACCOMMODATION. Apply travel scoring rules: recency weighting, host scoring, cancellation policy scoring, cleanliness as health_score. Labels should be BOOK IT / THINK TWICE / SKIP."
     } else {
-        "\n\nDOMAIN: SHOPPING. Apply standard product scoring rules. Labels should be Smart Buy / Check / Avoid."
+        "\n\nDOMAIN: SHOPPING. Apply standard product scoring rules. Labels should be Smart Buy / Check / Avoid. In comparison_summary and why_ranked, use 'Buy' (never 'Book'). Example: 'Buy the Olaplex — best value at $16 with strong reviews.'"
     };
 
     // Extract area/search context and notes if present (appended by content script or intent handler)
@@ -1102,6 +1102,7 @@ fn build_compare_html(session_id: &str) -> String {
 
       // Score bars
       html += miniScoreBar("Purchase", top.purchase_score);
+      if (top.review_trust?.trust_score) html += miniScoreBar("Trust", top.review_trust.trust_score);
       if (top.health_score > 0) html += miniScoreBar("Health", top.health_score);
 
       // Why #1

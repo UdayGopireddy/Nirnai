@@ -595,7 +595,7 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
       "warnings": ["<concern>"]
     }
   ],
-  "comparison_summary": "<2-3 sentences: who should book #1, the key tradeoff with #2, and any to avoid>"
+  "comparison_summary": "<2-3 sentences: who should buy/book #1, the key tradeoff with #2, and any to avoid. Use 'Buy' for shopping, 'Book' for travel.>"
 }
 
 ══════════════════════════════════════════════════════════════
@@ -748,13 +748,16 @@ F. A listing with a dramatic negative signal (safety, cleanliness, dishonesty) s
    GOOD: "$630 cheaper but 4.96 vs 4.99 rating — negligible quality difference"
    BAD: "slightly lower quality" (useless)
 
-4. comparison_summary must be scannable — who should book what:
-   GOOD: "Book the Bungalow — best value at $694 with near-perfect reviews. The Home in Tampa costs $630 more for marginally better amenities. Skip the Studio — too few reviews to trust."
+4. comparison_summary must be scannable — who should buy/book what:
+   TRAVEL GOOD: "Book the Bungalow — best value at $694 with near-perfect reviews. The Home in Tampa costs $630 more for marginally better amenities. Skip the Studio — too few reviews to trust."
+   SHOPPING GOOD: "Buy the Olaplex 3.3 oz — best price per ounce at $4.85 with strong reviews. The 8.5 oz is $7 more but costs more per ounce. Avoid the travel kit — too few reviews."
    BAD: "The top pick offers the best balance of price and quality."
+   IMPORTANT: Use "Buy" for shopping products, "Book" for travel/accommodation. NEVER use "Book" for shopping items.
 
 5. When savings exist, ALWAYS mention them in why_ranked and comparison_summary.
 
-6. Stamp labels for travel: BOOK IT / THINK TWICE / SKIP"#.to_string()
+6. Stamp labels for travel: BOOK IT / THINK TWICE / SKIP
+7. Stamp labels for shopping: Smart Buy / Check / Avoid. NEVER use BOOK IT for shopping products."#.to_string()
 }
 
 // ── Format product data as a prompt ──
