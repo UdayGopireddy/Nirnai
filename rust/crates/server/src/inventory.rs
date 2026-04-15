@@ -466,8 +466,10 @@ impl Inventory {
                 .expression_attribute_values(":lng_max", AttributeValue::N((lng + lng_delta).to_string()));
         }
 
+        // Don't use DynamoDB Limit — it caps items *evaluated* (pre-filter),
+        // not results returned.  At low volume a full scan is fine; we
+        // truncate after sorting below.
         let result = scan
-            .limit(params.limit as i32)
             .send()
             .await
             .map_err(|e| format!("DynamoDB scan: {e}"))?;

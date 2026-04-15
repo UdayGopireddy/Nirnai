@@ -127,7 +127,7 @@ a:hover {{ text-decoration: underline; }}
   <div class="container">
     {body}
   </div>
-  <div class="footer">🛡️ NirnAI — Clear decisions. Every purchase.<br><a href="/privacy" style="color:#7eb8da;text-decoration:none;font-size:11px;">Privacy Policy</a> · <a href="/support" style="color:#7eb8da;text-decoration:none;font-size:11px;">Support</a></div>
+  <div class="footer">🛡️ NirnAI — Clear decisions. Every purchase.<br><a href="/privacy" style="color:#7eb8da;text-decoration:none;font-size:11px;">Privacy Policy</a> · <a href="/support" style="color:#7eb8da;text-decoration:none;font-size:11px;">Support</a><br><span style="font-size:9px;opacity:0.6;">As an Amazon Associate and affiliate partner, NirnAI earns from qualifying purchases.</span></div>
 </body>
 </html>"##,
         title = title,
@@ -191,6 +191,8 @@ fn build_privacy_html() -> String {
       <li><strong>OpenAI:</strong> Product data may be sent to OpenAI's API for AI-powered analysis summaries. OpenAI's data usage policy applies.</li>
       <li><strong>AWS:</strong> Infrastructure hosting (App Runner, DynamoDB). Data resides in the US East (N. Virginia) region.</li>
       <li><strong>Awin:</strong> Affiliate link tracking for Booking.com. Awin may set cookies on the destination site, subject to their own privacy policy.</li>
+      <li><strong>Amazon Associates:</strong> As an Amazon Associate, NirnAI earns from qualifying purchases. Amazon may set cookies when you click affiliate links.</li>
+      <li><strong>Impact.com:</strong> Affiliate tracking for retail partners (Walmart, Target, Airbnb). Impact may set cookies on destination sites.</li>
     </ul>
 
     <h2>5. Chrome Extension Permissions</h2>

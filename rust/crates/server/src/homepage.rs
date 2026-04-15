@@ -987,7 +987,7 @@ footer {{
 <footer>
   NirnAI — Clear decisions. Every purchase.
   <div style="margin-top:8px;font-size:11px;"><a href="/privacy" style="color:#7eb8da;text-decoration:none;">Privacy Policy</a> · <a href="/support" style="color:#7eb8da;text-decoration:none;">Support</a></div>
-  <div style="font-size:9px;opacity:0.6;margin-top:4px;">As a Booking.com Affiliate, NirnAI earns from qualifying transactions. This does not affect our rankings.</div>
+  <div style="font-size:9px;opacity:0.6;margin-top:4px;">As an Amazon Associate and affiliate partner, NirnAI earns from qualifying purchases. This does not affect our rankings or recommendations.</div>
 </footer>
 
 <!-- Processing overlay -->
