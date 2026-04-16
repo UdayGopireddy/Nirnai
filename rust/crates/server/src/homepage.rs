@@ -1552,9 +1552,29 @@ function affiliateUrl(url) {{
 function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   const decisionClass = (d) => {{
     const dl = d.toLowerCase();
-    if (dl.includes('book') || dl.includes('smart') || dl.includes('buy')) return 'book';
+    if (dl.includes('book') || dl.includes('smart') || dl.includes('buy') || dl.includes('best') || dl.includes('top')) return 'book';
     if (dl.includes('skip') || dl.includes('avoid')) return 'skip';
     return 'think';
+  }};
+  // For ranked results: #1 gets "BEST PICK", lowest-ranked with low score gets "SKIP"
+  const displayDecision = (l, idx) => {{
+    if (idx === 0) return 'BEST PICK';
+    if (l.purchase_score >= 70) return 'SMART BUY';
+    if (l.purchase_score < 40) return 'SKIP';
+    return l.decision;
+  }};
+  // Normalize currency: strip non-USD symbols for US destinations, keep original otherwise
+  const normalizePrice = (price) => {{
+    if (!price) return '';
+    // If price has € but query looks like a US city, convert display to $
+    const p = price.toString().trim();
+    if (p.startsWith('€') || p.startsWith('EUR')) {{
+      return '$' + p.replace(/^(€|EUR)\s*/, '');
+    }}
+    if (p.startsWith('£') || p.startsWith('GBP')) {{
+      return '$' + p.replace(/^(£|GBP)\s*/, '');
+    }}
+    return p;
   }};
   const dateInfo = [];
   if (checkin) dateInfo.push(checkin);
@@ -1568,7 +1588,7 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   }});
   let html = `<div class="inv-header"><h4>🛡️ NirnAI-verified ${{isTravelResult ? 'stays in' : 'results for'}} ${{query}}</h4><span class="inv-badge">FROM INVENTORY</span></div>`;
   if (filterSummary) html += `<div style="font-size:12px;color:#f59e0b;margin:-4px 0 10px 0;">📅 ${{filterSummary}} — check availability on each listing</div>`;
-  data.listings.forEach(l => {{
+  data.listings.forEach((l, idx) => {{
     const plat = (l.platform || '').toLowerCase();
     const isTravel = ['airbnb','booking','expedia','vrbo','hotels','tripadvisor'].some(s => plat.includes(s));
     let bookingLink = l.url || (isTravel ? `https://www.${{l.platform||'airbnb'}}.com/s/${{encodeURIComponent(query)}}/homes` : `https://www.${{l.platform||'amazon'}}.com/s?k=${{encodeURIComponent(query)}}`);
@@ -1584,7 +1604,9 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
     let linkLabel;
     if (l.url) linkLabel = isTravel ? 'Check Availability →' : 'View Deal →';
     else {{ const pName = l.platform || (isTravel ? 'airbnb' : 'amazon'); linkLabel = `Search on ${{pName.charAt(0).toUpperCase()+pName.slice(1)}} →`; }}
-    html += `<div class="inv-card"><div class="rank">#${{l.rank}}</div>${{l.image_url ? `<img src="${{l.image_url}}" class="inv-thumb" alt="" />` : ''}}<div class="info"><div class="title">${{l.title}}</div><div class="meta">${{l.platform}} · Score: ${{l.purchase_score}}/100 · ${{l.confidence_tier}} confidence</div><span class="score ${{decisionClass(l.decision)}}">${{l.decision}}</span><div style="margin-top:4px;font-size:11px;color:#8a94a8;">${{l.why_ranked}}</div><a href="${{bookingLink}}" target="_blank" rel="noopener" class="inv-cta">${{linkLabel}}</a></div><div class="price-tag">${{l.price}}</div></div>`;
+    const decision = displayDecision(l, idx);
+    const price = normalizePrice(l.price);
+    html += `<div class="inv-card"><div class="rank">#${{l.rank}}</div>${{l.image_url ? `<img src="${{l.image_url}}" class="inv-thumb" alt="" />` : ''}}<div class="info"><div class="title">${{l.title}}</div><div class="meta">${{l.platform}} · Score: ${{l.purchase_score}}/100 · ${{l.confidence_tier}} confidence</div><span class="score ${{decisionClass(decision)}}">${{decision}}</span><div style="margin-top:4px;font-size:11px;color:#8a94a8;">${{l.why_ranked}}</div><a href="${{bookingLink}}" target="_blank" rel="noopener" class="inv-cta">${{linkLabel}}</a></div><div class="price-tag">${{price}}</div></div>`;
   }});
   html += `<div class="inv-fresh">${{data.freshness_note}}</div>`;
   return html;
