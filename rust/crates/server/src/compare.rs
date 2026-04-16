@@ -105,6 +105,100 @@ impl SessionStore {
             .map(|r| r.item.is_some())
             .unwrap_or(false)
     }
+
+    /// Scan recent completed sessions for the homepage sidebar.
+    /// Returns lightweight summaries (no full listing data).
+    pub async fn recent(&self, limit: usize) -> Vec<RecentSearch> {
+        let result = self
+            .client
+            .scan()
+            .table_name(SESSIONS_TABLE)
+            .send()
+            .await;
+
+        let items = match result {
+            Ok(r) => r.items().to_vec(),
+            Err(_) => return vec![],
+        };
+
+        let mut searches: Vec<RecentSearch> = items
+            .iter()
+            .filter_map(|item| {
+                let data_str = item.get("data")?.as_s().ok()?;
+                let session: CompareSession = serde_json::from_str(data_str).ok()?;
+                if session.status != SessionStatus::Done { return None; }
+                let result = session.result.as_ref()?;
+                let ranked = &result.ranked;
+                if ranked.is_empty() { return None; }
+
+                // Extract destination from search_context
+                let ctx = &session.search_context;
+                let destination = extract_destination(ctx);
+                if destination.is_empty() { return None; }
+
+                let top = &ranked[0];
+                let listing_count = ranked.len();
+
+                Some(RecentSearch {
+                    id: session.id.clone(),
+                    destination: destination.clone(),
+                    top_pick: top.title.clone(),
+                    top_score: top.purchase_score,
+                    top_decision: top.stamp.label.clone(),
+                    listing_count,
+                })
+            })
+            .collect();
+
+        // Sort by listing_count desc (busiest sessions first)
+        searches.sort_by(|a, b| b.listing_count.cmp(&a.listing_count));
+        searches.truncate(limit);
+        searches
+    }
+}
+
+// ── Recent search summary ──
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentSearch {
+    pub id: String,
+    pub destination: String,
+    pub top_pick: String,
+    pub top_score: u32,
+    pub top_decision: String,
+    pub listing_count: usize,
+}
+
+/// Extract a human-readable destination from search_context string.
+fn extract_destination(ctx: &str) -> String {
+    // Look for "AREA CONTEXT: <destination> ("
+    if let Some(start) = ctx.find("AREA CONTEXT: ") {
+        let after = &ctx[start + 14..];
+        if let Some(end) = after.find(" (") {
+            return after[..end].to_string();
+        }
+        // fallback: take until newline
+        if let Some(end) = after.find('\n') {
+            return after[..end].to_string();
+        }
+    }
+    // Fallback: try to pull destination from URL query param
+    if let Some(start) = ctx.find("destination=") {
+        let after = &ctx[start + 12..];
+        let end = after.find('&').unwrap_or(after.len());
+        let raw = &after[..end];
+        // Simple percent-decode
+        let decoded = raw.replace("%20", " ").replace("%2C", ",").replace("%2c", ",").replace("+", " ");
+        return decoded;
+    }
+    String::new()
+}
+
+/// GET /api/recent-searches
+pub async fn recent_searches(
+    State(sessions): State<SessionStore>,
+) -> Json<Vec<RecentSearch>> {
+    Json(sessions.recent(10).await)
 }
 
 // ── Combined app state ──

@@ -81,6 +81,9 @@ export class ExpediaExtractor implements SiteExtractor {
 
   isSearchPage(): boolean {
     const path = window.location.pathname;
+    // Exclude hotel detail pages that contain "Hotels" in the slug
+    // e.g. /Washington-Hotels-West-End-Washington-DC.h25371.Hotel-Information
+    if (this.isProductPage()) return false;
     // /Hotel-Search, /-Hotels, Search results
     if (/Hotel-Search|Hotels?\b/i.test(path)) return true;
     if (path.includes("/search")) return true;

@@ -56,6 +56,7 @@ async fn main() {
         .route("/intent/search", post(intent::intent_search))
         .route("/intent/compare", post(intent::intent_compare))
         .route("/listings/search", get(inventory::search_inventory))
+        .route("/api/recent-searches", get(compare::recent_searches))
         .route("/track/click", post(clicks::track_click))
         .route("/privacy", get(pages::privacy))
         .route("/support", get(pages::support))
