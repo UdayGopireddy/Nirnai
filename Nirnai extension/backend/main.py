@@ -34,6 +34,7 @@ from health_scoring import calculate_health_score, is_food_product, is_personal_
 from decision_engine import generate_stamp, compute_confidence
 from ai_service import get_ai_summary, get_alternative_suggestion, _generate_fallback_summary
 from domain_classifier import classify_domain
+from india_retail_scorer import score_india_retail
 
 app = FastAPI(
     title="NirnAI API",
@@ -107,12 +108,106 @@ async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
 
+async def _analyze_india(product: ProductData) -> AnalysisResponse:
+    """India parallel scoring path. Built on india_retail_scorer; reuses the
+    existing AnalysisResponse shape so the UI is unchanged.
+
+    Health scoring still runs (groceries, beauty, etc. work the same way) but
+    the purchase score, breakdown, and reasons all come from the India scorer.
+    """
+    # Look up cross-retailer median for this canonical product. Best-effort —
+    # missing data just means the scorer falls back to MRP-only signal.
+    median_effective: Optional[float] = None
+    try:
+        from canonical_id import canonicalize_product
+        from product_cache import get_default_cache
+        rec_id = canonicalize_product(product.model_dump())
+        cache = get_default_cache()
+        existing = cache.get(rec_id)
+        if existing and existing.get("last_price"):
+            from india_pricing import parse_inr
+            v = parse_inr(existing.get("last_price", ""))
+            if v and v > 0:
+                median_effective = v
+    except Exception:  # noqa: BLE001
+        median_effective = None
+
+    india = score_india_retail(product, median_effective_price=median_effective)
+    health_score, health_breakdown = calculate_health_score(product)
+    food = is_food_product(product)
+
+    # Synthesize a ReviewTrust from the India breakdown so the existing decision
+    # engine path still works.
+    from models import ReviewTrust as _RT
+    review_trust = _RT(trust_score=india.breakdown.seller)
+
+    risk_flags = detect_risk_flags(product, review_trust)
+    stamp, legacy_decision, reasons, warnings, positives = generate_stamp(
+        purchase_score=india.purchase_score,
+        health_score=health_score,
+        is_food=food,
+        product=product,
+        review_trust=review_trust,
+        risk_flags=risk_flags,
+    )
+
+    # Prepend India-specific reasons (effective price, MRP, COD/EMI) above the
+    # generic stamp reasons so the user sees the price story first.
+    reasons = (india.reasons + reasons)[:5]
+
+    confidence = compute_confidence(product, review_trust, india.purchase_score)
+    summary = _generate_fallback_summary(product, india.purchase_score, health_score, legacy_decision)
+    suggestion = None  # AI summary/suggestion deliberately skipped for India v1 to keep latency low.
+
+    # Cache write — same shape as the US path so /products/recheck works
+    # uniformly across markets.
+    try:
+        from product_cache import get_default_cache
+        _cache = get_default_cache()
+        _rec, _hit = _cache.remember_product(product.model_dump())
+        _cache.record_score(
+            _rec.product_id,
+            india.purchase_score,
+            health_score,
+            extras={
+                "last_price": product.price or "",
+                "last_currency": product.currency or "INR",
+                "country": "IN",
+                "effective_price": str(round(india.pricing.effective, 2)),
+            },
+        )
+    except Exception as _e:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger("analyze").debug("IN cache write skipped: %s", _e)
+
+    return AnalysisResponse(
+        purchase_score=india.purchase_score,
+        health_score=health_score,
+        decision=legacy_decision,
+        stamp=stamp,
+        purchase_breakdown=india.breakdown,
+        health_breakdown=health_breakdown,
+        review_trust=review_trust,
+        reasons=reasons,
+        warnings=warnings,
+        positives=positives,
+        confidence=confidence,
+        summary=summary,
+        suggestion=suggestion,
+        domain=classify_domain(product.source_site, product.category, product.title).value,
+    )
+
+
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_product(product: ProductData) -> AnalysisResponse:
     """Analyze a product and return scores, stamp, reasons, and decision."""
 
+    # India shoppers get a parallel scoring track tuned for MRP / bank offers /
+    # COD / EMI signals. The US flow below is unchanged for everyone else.
+    if (product.country or "").upper() == "IN":
+        return await _analyze_india(product)
+
     # Calculate scores (purchase scoring now returns ReviewTrust too)
-    purchase_score, purchase_breakdown, review_trust = calculate_purchase_score(product)
     health_score, health_breakdown = calculate_health_score(product)
 
     food = is_food_product(product)

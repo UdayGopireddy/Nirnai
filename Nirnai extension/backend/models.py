@@ -23,6 +23,23 @@ class ProductData(BaseModel):
     source_site: str = "amazon"
     page_type: str = "product"
 
+    # ── India / regional pricing extensions ──
+    # Inferred from page TLD by the extension (e.g. amazon.in -> "IN").
+    # Defaults to empty string so non-India flows are unaffected.
+    country: str = ""
+    # M.R.P. (Maximum Retail Price) printed on Indian listings, raw string.
+    mrp: str = ""
+    # Bank/card offer lines as scraped, e.g. ["10% Instant Discount on HDFC Cards up to ₹500"].
+    bank_offers: list[str] = []
+    # Visible coupon line, e.g. "Apply ₹300 coupon".
+    coupon: str = ""
+    # Shipping cost as a raw string ("FREE", "₹40").
+    shipping_cost: str = ""
+    # Whether a "No Cost EMI" badge is present.
+    emi_no_cost: bool = False
+    # Whether Cash-on-Delivery is offered.
+    cod_available: bool = False
+
 
 class PurchaseBreakdown(BaseModel):
     reviews: int = 0
