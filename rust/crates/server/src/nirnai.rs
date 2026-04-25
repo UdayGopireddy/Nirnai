@@ -196,12 +196,32 @@ pub struct RankedListing {
     pub tradeoffs: Vec<String>,
     pub positives: Vec<String>,
     pub warnings: Vec<String>,
+    #[serde(default = "default_domain")]
+    pub domain: String,
+}
+
+fn default_domain() -> String {
+    "general".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchResponse {
     pub ranked: Vec<RankedListing>,
     pub comparison_summary: String,
+    /// Origin product baseline (alternatives flow only)
+    #[serde(default)]
+    pub origin_title: String,
+    #[serde(default)]
+    pub origin_purchase_score: i32,
+    #[serde(default)]
+    pub origin_trust_score: i32,
+    #[serde(default)]
+    pub origin_url: String,
+    #[serde(default)]
+    pub origin_price: String,
+    /// True when the user's original product is better than every alternative found.
+    #[serde(default)]
+    pub origin_is_best: bool,
 }
 
 // ── Agent-backed API client ──
@@ -364,7 +384,7 @@ Scoring rules:
 - health_score: For food/supplements: nutrition (40%), ingredients safety (35%), processing level (25%). For personal care (shampoo, skincare, cosmetics, soap): ingredients safety (60%), allergen risk (25%), certifications (15%). For non-food AND non-personal-care items (electronics, clothing, furniture, etc.): set to 0 with health_signal "Not applicable".
 - decision logic:
   1. SMART_BUY if purchase_score >= 75 AND (health_score >= 60 OR health_score == 0)
-  2. PREMIUM QUALITY OVERRIDE: For personal care / food / supplements, if health_score >= 80 then SMART_BUY even if purchase_score is 40-74. These are premium products where ingredient quality justifies the price. Label should be "Smart Buy" with purchase_signal like "Premium ingredients justify the price" or "Top-tier ingredient safety".
+  2. PREMIUM QUALITY OVERRIDE: For personal care / food / supplements, if health_score >= 80 then SMART_BUY even if purchase_score is 40-74. These are premium products where ingredient quality justifies the price. Label should be "Best Pick" with purchase_signal like "Premium ingredients justify the price" or "Top-tier ingredient safety".
   3. CHECK if purchase_score >= 40
   4. AVOID if purchase_score < 40 OR (health_score > 0 AND health_score < 30)
 - IMPORTANT: health_score of 0 means "not applicable" — it must NEVER penalize the decision. Only a scored health_score below 30 should trigger AVOID.
@@ -385,7 +405,7 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
   "decision": "SMART_BUY" | "CHECK" | "AVOID",
   "stamp": {
     "stamp": "SMART_BUY" | "CHECK" | "AVOID",
-    "label": "<short label like BOOK IT / THINK TWICE / SKIP>",
+    "label": "<Best Pick / High Confidence / Good Option / Needs Caution / Risk Flagged>",
     "icon": "🟢" | "🟡" | "🔴",
     "reasons": ["<reason1>", "<reason2>"],
     "purchase_signal": "<one-line booking insight>",
@@ -458,9 +478,9 @@ review_trust scoring:
 - authenticity: Recent detailed reviews > old generic praise. Look for specific details (room descriptions, neighborhood mentions, host interactions) as authenticity signals.
 
 decision thresholds:
-- SMART_BUY ("BOOK IT"): purchase_score >= 75 AND health_score >= 70
-- AVOID ("SKIP"): purchase_score < 40 OR health_score < 40
-- CHECK ("THINK TWICE"): everything else
+- SMART_BUY ("Best Pick"): purchase_score >= 75 AND health_score >= 70
+- AVOID ("Risk Flagged"): purchase_score < 40 OR health_score < 40
+- CHECK: everything else — label as "High Confidence" if purchase_score >= 65, "Good Option" if >= 50, "Needs Caution" if < 50
 
 The "ingredients" field contains AMENITIES. The "nutritionInfo" field contains CATEGORY RATINGS and REVIEW SNIPPETS. The "seller" field is the HOST. The "fulfiller" field indicates SUPERHOST STATUS and HOST DETAILS. The "returnPolicy" field is the CANCELLATION POLICY. The "delivery" field contains CHECK-IN/CHECKOUT info and property specs.
 
@@ -581,7 +601,7 @@ You MUST respond with ONLY valid JSON matching this exact schema — no markdown
       "decision": "SMART_BUY" | "CHECK" | "AVOID",
       "stamp": {
         "stamp": "SMART_BUY" | "CHECK" | "AVOID",
-        "label": "<BOOK IT / THINK TWICE / SKIP or Smart Buy / Check / Avoid>",
+        "label": "<Best Pick / High Confidence / Good Option / Needs Caution / Risk Flagged>",
         "icon": "🟢" | "🟡" | "🔴",
         "reasons": ["<reason1>", "<reason2>"],
         "purchase_signal": "<one-line insight>",
@@ -777,8 +797,8 @@ F. A listing with a dramatic negative signal (safety, cleanliness, dishonesty) s
 
 5. When savings exist, ALWAYS mention them in why_ranked and comparison_summary.
 
-6. Stamp labels for travel: BOOK IT / THINK TWICE / SKIP
-7. Stamp labels for shopping: Smart Buy / Check / Avoid. NEVER use BOOK IT for shopping products."#.to_string()
+6. Stamp labels: Best Pick / High Confidence / Good Option / Needs Caution / Risk Flagged
+7. NEVER use 'BOOK IT', 'THINK TWICE', 'THINK ABOUT IT', or 'SKIP' as labels. Use trust-first labels only."#.to_string()
 }
 
 // ── Format product data as a prompt ──
@@ -1040,10 +1060,23 @@ pub async fn health_check() -> &'static str {
 // ── Batch comparison ──
 
 pub fn format_batch_prompt(listings: &[ProductData], search_context: &str) -> String {
-    let mut parts = vec![format!(
-        "Compare and rank these {} listings. Rank from best value to worst.\n",
-        listings.len()
-    )];
+    // Detect if this is an alternatives search (vs general browse comparison)
+    let is_alternatives = search_context.contains("FIND ALTERNATIVES") || search_context.contains("ORIGINAL PRODUCT");
+
+    let mut parts = if is_alternatives {
+        vec![format!(
+            "The user wants to find the BEST ALTERNATIVE among these {} products.\n\
+             These are all different products in the same category — rank by which one the user should BUY.\n\
+             Focus on: product quality, review trust, value for money, and brand reputation.\n\
+             Do NOT include the user's original product in the ranking — only rank the alternatives.\n",
+            listings.len()
+        )]
+    } else {
+        vec![format!(
+            "Compare and rank these {} listings. Rank from best value to worst.\n",
+            listings.len()
+        )]
+    };
 
     if !search_context.is_empty() {
         parts.push(format!("Search context: {}\n", search_context));

@@ -56,6 +56,17 @@ pub struct InventorySearchResponse {
     pub freshness_note: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct InventoryRecentSearch {
+    pub session_id: String,
+    pub destination: String,
+    pub top_pick: String,
+    pub top_score: u32,
+    pub top_decision: String,
+    pub listing_count: usize,
+    pub ranked_at: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SearchParams {
     #[serde(default)]
@@ -188,6 +199,55 @@ pub fn parse_geo_context(search_context: &str, source_site: &str) -> GeoContext 
 }
 
 // ── DynamoDB helpers ──
+
+/// Decide a human-friendly destination label for the homepage recents list.
+/// If the stored destination is empty, numeric (e.g. a barcode/zip captured by
+/// the upstream parser), or too short to be meaningful, derive a city/title
+/// from the top listing instead.
+fn clean_destination_label(stored: &str, fallback_title: &str) -> String {
+    let trimmed = stored.trim();
+    let is_garbage = trimmed.is_empty()
+        || trimmed.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ' ')
+        || trimmed.len() < 3;
+
+    if !is_garbage {
+        return trimmed.to_string();
+    }
+
+    // Try to pull a city from a hotel-style title: "Hotel Name, City, Country".
+    let segments: Vec<&str> = fallback_title
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let skip_words = [
+        "United", "India", "Hotel", "Hotels", "Resort", "Suite", "Suites",
+        "Inn", "Apartment", "House", "Country", "State", "Downtown",
+    ];
+
+    for seg in segments.iter().rev() {
+        let s = *seg;
+        if s.len() > 30 || s.is_empty() {
+            continue;
+        }
+        if skip_words.iter().any(|w| s.contains(w)) {
+            continue;
+        }
+        return s.to_string();
+    }
+
+    if !fallback_title.trim().is_empty() {
+        let t = fallback_title.trim();
+        return if t.len() > 35 {
+            format!("{}…", &t[..32])
+        } else {
+            t.to_string()
+        };
+    }
+
+    "Recent search".to_string()
+}
 
 fn ttl_value() -> String {
     let ttl = std::time::SystemTime::now()
@@ -407,6 +467,7 @@ impl Inventory {
             tradeoffs: vec![],
             positives: analysis.positives.clone(),
             warnings: analysis.warnings.clone(),
+            domain: "general".to_string(),
         };
 
         let geo = GeoContext {
@@ -489,6 +550,129 @@ impl Inventory {
         listings.truncate(params.limit);
 
         Ok(listings)
+    }
+
+    /// Fetch all inventory rows for a single session (one query on the partition key).
+    /// Used as a fallback when the live session record is no longer in `nirnai-sessions`
+    /// but rankings persist in `nirnai-inventory`.
+    pub async fn get_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<InventoryListing>, String> {
+        let result = self
+            .client
+            .query()
+            .table_name(INVENTORY_TABLE)
+            .key_condition_expression("session_id = :sid")
+            .expression_attribute_values(
+                ":sid",
+                AttributeValue::S(session_id.to_string()),
+            )
+            .send()
+            .await
+            .map_err(|e| format!("DynamoDB query inventory by session: {e}"))?;
+
+        let mut listings: Vec<InventoryListing> = result
+            .items()
+            .iter()
+            .filter_map(item_to_listing)
+            .collect();
+
+        listings.sort_by(|a, b| a.rank.cmp(&b.rank));
+        Ok(listings)
+    }
+
+    pub async fn recent_searches(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<InventoryRecentSearch>, String> {
+        let mut items: Vec<std::collections::HashMap<String, AttributeValue>> = Vec::new();
+        let mut start_key: Option<std::collections::HashMap<String, AttributeValue>> = None;
+
+        loop {
+            let result = self.client
+                .scan()
+                .table_name(INVENTORY_TABLE)
+                .set_exclusive_start_key(start_key.clone())
+                .send()
+                .await
+                .map_err(|e| format!("DynamoDB scan inventory recents: {e}"))?;
+
+            items.extend(result.items().iter().cloned());
+            start_key = result.last_evaluated_key().cloned();
+            if start_key.is_none() {
+                break;
+            }
+        }
+
+        let mut listings: Vec<InventoryListing> = items
+            .iter()
+            .filter_map(item_to_listing)
+            .collect();
+
+        listings.sort_by(|a, b| {
+            b.ranked_at.cmp(&a.ranked_at)
+                .then(a.session_id.cmp(&b.session_id))
+                .then(a.rank.cmp(&b.rank))
+        });
+
+        #[derive(Clone)]
+        struct RecentAccumulator {
+            session_id: String,
+            destination: String,
+            top_pick: String,
+            top_score: u32,
+            top_decision: String,
+            listing_count: usize,
+            ranked_at: String,
+            top_rank: u32,
+        }
+
+        let mut grouped: std::collections::HashMap<String, RecentAccumulator> = std::collections::HashMap::new();
+        for listing in listings {
+            let destination = clean_destination_label(&listing.destination, &listing.title);
+
+            let entry = grouped.entry(listing.session_id.clone()).or_insert_with(|| RecentAccumulator {
+                session_id: listing.session_id.clone(),
+                destination,
+                top_pick: listing.title.clone(),
+                top_score: listing.purchase_score,
+                top_decision: listing.decision.clone(),
+                listing_count: 0,
+                ranked_at: listing.ranked_at.clone(),
+                top_rank: listing.rank,
+            });
+
+            entry.listing_count += 1;
+
+            if listing.rank < entry.top_rank {
+                entry.top_rank = listing.rank;
+                entry.top_pick = listing.title.clone();
+                entry.top_score = listing.purchase_score;
+                entry.top_decision = listing.decision.clone();
+            }
+        }
+
+        let mut recents: Vec<InventoryRecentSearch> = grouped
+            .into_values()
+            .map(|entry| InventoryRecentSearch {
+                session_id: entry.session_id,
+                destination: entry.destination,
+                top_pick: entry.top_pick,
+                top_score: entry.top_score,
+                top_decision: entry.top_decision,
+                listing_count: entry.listing_count,
+                ranked_at: entry.ranked_at,
+            })
+            .collect();
+
+        recents.sort_by(|a, b| {
+            b.ranked_at.cmp(&a.ranked_at)
+                .then_with(|| b.listing_count.cmp(&a.listing_count))
+        });
+        recents.truncate(limit);
+
+        Ok(recents)
     }
 }
 

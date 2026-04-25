@@ -248,7 +248,7 @@ nav {{
 
 .book {{
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 640px;
   gap: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -266,7 +266,7 @@ nav {{
   content: '';
   position: absolute;
   top: 20px; bottom: 20px;
-  right: 340px;
+  right: 640px;
   width: 1px;
   background: linear-gradient(to bottom,
     transparent,
@@ -470,7 +470,7 @@ nav {{
   padding: 28px 24px;
   display: flex;
   flex-direction: column;
-  max-height: 560px;
+  max-height: 760px;
 }}
 
 .recent-header {{
@@ -507,6 +507,54 @@ nav {{
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+}}
+
+.recent-header {{
+  position: relative;
+}}
+
+.recent-viewall {{
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--magic-purple);
+  text-decoration: none;
+  transition: opacity 0.15s;
+}}
+
+.recent-viewall:hover {{ opacity: 0.7; }}
+
+.recent-columns {{
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 0;
+}}
+
+.recent-col {{
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}}
+
+.recent-col-head {{
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}}
+
+.recent-col .recent-item {{ padding: 10px 12px; }}
+.recent-col .recent-dest {{ font-size: 13px; }}
+.recent-col .recent-meta {{ font-size: 10px; }}
+
+@media (max-width: 720px) {{
+  .recent-columns {{ grid-template-columns: 1fr; }}
 }}
 
 .recent-item {{
@@ -699,6 +747,53 @@ nav {{
   margin-top: 10px;
 }}
 
+/* ── Verdict Ticker ── */
+.verdict-ticker {{
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 12px;
+  max-width: 960px;
+  margin: 0 auto 20px;
+  padding: 0 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}}
+.verdict-ticker::-webkit-scrollbar {{ display: none; }}
+
+.verdict-card {{
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: border-color 0.2s, transform 0.2s;
+  cursor: default;
+}}
+.verdict-card:hover {{
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}}
+.vc-icon {{ font-size: 18px; }}
+.vc-text {{ font-weight: 700; color: var(--text-primary); font-size: 12px; }}
+.vc-tag {{
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+}}
+.vc-tag.smart {{ color: var(--green); background: var(--green-bg); border: 1px solid var(--green-border); }}
+.vc-tag.skip {{ color: var(--red); background: var(--red-bg); border: 1px solid var(--red-border); }}
+.vc-tag.think {{ color: var(--orange); background: var(--orange-bg); border: 1px solid var(--orange-border); }}
+.vc-detail {{ font-size: 11px; color: var(--text-muted); }}
+
 /* ── Trust Bar ── */
 .trust-bar {{
   display: flex;
@@ -851,6 +946,7 @@ footer {{
   .input-row {{ grid-template-columns: 1fr; }}
   .steps {{ grid-template-columns: 1fr; }}
   .trust-bar {{ flex-wrap: wrap; gap: 16px; }}
+  .verdict-ticker {{ padding: 0 16px; gap: 8px; }}
   .nav-links a:not(.nav-cta) {{ display: none; }}
   .book-wrapper {{ padding: 0 12px; }}
   .results-area {{ padding: 16px 12px 40px; }}
@@ -918,18 +1014,26 @@ footer {{
 
 <section class="hero">
   <h2>Clear decisions.<br><span class="gradient">Every purchase.</span></h2>
-  <p class="subtitle">Find the best option — not just more options. Real rankings from real data.</p>
+  <p class="subtitle">We analyze trust, reviews, and quality — so you don't have to.</p>
 </section>
+
+<!-- Dynamic verdict ticker - live from recent searches, fallback to examples -->
+<div class="verdict-ticker" id="verdict-ticker">
+  <div class="verdict-card vc-green"><span class="vc-icon">🏨</span><span class="vc-text">Hotels in Miami</span><span class="vc-tag smart">HIGH CONFIDENCE</span><span class="vc-detail">Reliable host · Strong reviews</span></div>
+  <div class="verdict-card vc-green"><span class="vc-icon">🏠</span><span class="vc-text">Airbnb in Manali</span><span class="vc-tag smart">VERIFIED</span><span class="vc-detail">Consistent reviews · Low risk</span></div>
+  <div class="verdict-card vc-orange"><span class="vc-icon">📱</span><span class="vc-text">iPhone 16 Pro</span><span class="vc-tag think">NEEDS CAUTION</span><span class="vc-detail">Mixed signals · Compare first</span></div>
+  <div class="verdict-card vc-green"><span class="vc-icon">☕</span><span class="vc-text">Coffee makers</span><span class="vc-tag smart">HIGH CONFIDENCE</span><span class="vc-detail">Proven quality · Top rated</span></div>
+</div>
 
 <div class="book-wrapper">
   <div class="book">
     <!-- Left page: Search -->
     <div class="book-left">
       <div class="mode-tabs">
-        <button class="mode-tab active" data-mode="link">
+        <button class="mode-tab" data-mode="link">
           <span class="tab-icon">🔗</span> Paste Link
         </button>
-        <button class="mode-tab" data-mode="search">
+        <button class="mode-tab active" data-mode="search">
           <span class="tab-icon">🔍</span> Search
         </button>
         <button class="mode-tab" data-mode="compare">
@@ -938,7 +1042,7 @@ footer {{
       </div>
 
       <!-- Mode 1: Paste a link -->
-      <div class="mode-panel active" id="panel-link">
+      <div class="mode-panel" id="panel-link">
         <div class="input-group">
           <label>Product or listing URL</label>
           <input type="url" id="link-input" placeholder="https://airbnb.com/rooms/… or amazon.com/dp/…" autocomplete="off">
@@ -950,7 +1054,7 @@ footer {{
       </div>
 
       <!-- Mode 2: Search -->
-      <div class="mode-panel" id="panel-search">
+      <div class="mode-panel active" id="panel-search">
         <div class="input-group ac-wrap">
           <label>What are you looking for?</label>
           <input type="text" id="search-input" placeholder="Hotels in Miami, noise-cancelling headphones…" autocomplete="off">
@@ -1070,10 +1174,24 @@ footer {{
         <div class="recent-glow"></div>
         <h3>Recent Searches</h3>
       </div>
-      <div class="recent-list" id="recent-list">
-        <div class="recent-empty">
-          <div class="empty-icon">✨</div>
-          <p>Loading recent searches…</p>
+      <div class="recent-columns">
+        <div class="recent-col">
+          <div class="recent-col-head">🏨 Stays</div>
+          <div class="recent-list" id="recent-list-stays">
+            <div class="recent-empty">
+              <div class="empty-icon">✨</div>
+              <p>Loading…</p>
+            </div>
+          </div>
+        </div>
+        <div class="recent-col">
+          <div class="recent-col-head">🛒 Shopping</div>
+          <div class="recent-list" id="recent-list-shop">
+            <div class="recent-empty">
+              <div class="empty-icon">✨</div>
+              <p>Loading…</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1117,13 +1235,13 @@ footer {{
       <div class="step-num">2</div>
       <div class="step-icon">🧠</div>
       <h4>AI analyzes your options</h4>
-      <p>We compare price, reviews, trust, and key signals across listings.</p>
+      <p>We analyze trust, reviews, quality, and risk signals across listings.</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
       <div class="step-icon">✅</div>
       <h4>Get a clear decision</h4>
-      <p>Smart Buy, Check, or Avoid — with full reasoning.</p>
+      <p>Confident, Caution, or Avoid — with full reasoning.</p>
     </div>
   </div>
 </section>
@@ -1153,7 +1271,7 @@ footer {{
 (function() {{
   const saved = localStorage.getItem('nirnai-theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const theme = saved || (prefersDark ? 'dark' : 'light');
+  const theme = saved || 'light';
   if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
   const btn = document.getElementById('theme-toggle');
   btn.textContent = theme === 'light' ? '☀️' : '🌙';
@@ -1236,48 +1354,110 @@ document.getElementById('search-input').addEventListener('keydown', e => {{
 }});
 
 // ── Recent searches ──
+// Classify each search as a stay (hotels/lodging) vs shopping (retail) using
+// keyword heuristics on the destination and top pick. The two groups render
+// into separate tab panes so users can find what they're looking for fast.
+function isStaySearch(s) {{
+  const STAY_KEYWORDS = [
+    'hotel','inn','suites','suite','resort','lodge','motel','apartment',
+    'apartments','hostel','b&b','bed and breakfast','villa','cabin','homestay',
+    'guesthouse','airbnb','vrbo','booking.com'
+  ];
+  const haystack = ((s.top_pick || '') + ' ' + (s.destination || '')).toLowerCase();
+  return STAY_KEYWORDS.some(k => haystack.includes(k));
+}}
+
+function badgeFor(s) {{
+  const dec = (s.top_decision || '').toLowerCase();
+  const cls = dec.includes('smart') || dec.includes('buy') || dec.includes('book') || dec.includes('best') ? 'smart'
+            : dec.includes('avoid') || dec.includes('skip') ? 'skip' : 'think';
+  const label = cls === 'smart' ? 'View Trusted Pick →' : cls === 'skip' ? 'See Why →' : 'View Analysis →';
+  return {{ cls, label }};
+}}
+
+function renderRecentItem(s) {{
+  const {{ cls, label }} = badgeFor(s);
+  const top = s.top_pick && s.top_pick.length > 30 ? s.top_pick.slice(0,30) + '…' : (s.top_pick || '');
+  return `
+    <a href="/compare/${{s.id}}" class="recent-item">
+      <div class="recent-dest">${{s.destination}}</div>
+      <div class="recent-meta">
+        ${{s.listing_count}} listings ranked · Top: ${{top}}
+      </div>
+      <span class="recent-badge ${{cls}}">${{label}}</span>
+    </a>`;
+}}
+
+function renderEmptyPane(label) {{
+  return `
+    <div class="recent-empty">
+      <div class="empty-icon">📖</div>
+      <p>No ${{label}} searches yet.<br>Use the extension to build your history.</p>
+    </div>`;
+}}
+
 (async function loadRecent() {{
   try {{
     const resp = await fetch('/api/recent-searches');
     const data = await resp.json();
-    const list = document.getElementById('recent-list');
+    const stays = document.getElementById('recent-list-stays');
+    const shop  = document.getElementById('recent-list-shop');
+
     if (!data || data.length === 0) {{
-      list.innerHTML = `
+      const empty = `
         <div class="recent-empty">
           <div class="empty-icon">📖</div>
           <p>No searches yet.<br>Use the extension on any travel or shopping site — rankings will appear here.</p>
         </div>`;
+      stays.innerHTML = empty;
+      shop.innerHTML  = empty;
       return;
     }}
-    list.innerHTML = data.map(s => {{
-      const cls = s.top_decision.toLowerCase().includes('smart') || s.top_decision.toLowerCase().includes('buy') || s.top_decision.toLowerCase().includes('book') ? 'smart'
-        : s.top_decision.toLowerCase().includes('avoid') || s.top_decision.toLowerCase().includes('skip') ? 'skip' : 'think';
-      return `
-        <a href="/compare/${{s.id}}" class="recent-item">
-          <div class="recent-dest">${{s.destination}}</div>
-          <div class="recent-meta">
-            ${{s.listing_count}} listings ranked · Top: ${{s.top_pick.length > 30 ? s.top_pick.slice(0,30) + '…' : s.top_pick}}
-          </div>
-          <span class="recent-badge ${{cls}}">${{s.top_decision}}</span>
-        </a>`;
-    }}).join('');
+
+    const stayItems = data.filter(isStaySearch);
+    const shopItems = data.filter(s => !isStaySearch(s));
+
+    stays.innerHTML = stayItems.length
+      ? stayItems.map(renderRecentItem).join('')
+      : renderEmptyPane('stay');
+    shop.innerHTML = shopItems.length
+      ? shopItems.map(renderRecentItem).join('')
+      : renderEmptyPane('shopping');
   }} catch (e) {{
-    document.getElementById('recent-list').innerHTML = `
+    const fallback = `
       <div class="recent-empty">
         <div class="empty-icon">📖</div>
         <p>Browse with the NirnAI extension to build your search history.</p>
       </div>`;
+    document.getElementById('recent-list-stays').innerHTML = fallback;
+    document.getElementById('recent-list-shop').innerHTML  = fallback;
   }}
 }})();
 
+// ── Dynamic verdict ticker from recent searches ──
+(async function loadVerdictTicker() {{
+  try {{
+    const resp = await fetch('/api/recent-searches');
+    const data = await resp.json();
+    if (!data || data.length === 0) return; // keep static fallback
+    const ticker = document.getElementById('verdict-ticker');
+    const icons = ['🏨','🛒','🏠','✈️','💻','🎧','📱','👟','🛏️','☕'];
+    ticker.innerHTML = data.map((s, i) => {{
+      const cls = s.top_decision.toLowerCase().includes('smart') || s.top_decision.toLowerCase().includes('buy') || s.top_decision.toLowerCase().includes('book') || s.top_decision.toLowerCase().includes('best') ? 'smart'
+        : s.top_decision.toLowerCase().includes('avoid') || s.top_decision.toLowerCase().includes('skip') ? 'skip' : 'think';
+      const tag = cls === 'smart' ? 'HIGH CONFIDENCE' : cls === 'skip' ? 'RISK FLAGGED' : 'VIEW ANALYSIS';
+      const color = cls === 'smart' ? 'vc-green' : cls === 'skip' ? 'vc-red' : 'vc-orange';
+      const detail = `${{s.listing_count}} listings ranked`;
+      const icon = icons[i % icons.length];
+      return `<a href="/compare/${{s.id}}" class="verdict-card ${{color}}" style="text-decoration:none;color:inherit;"><span class="vc-icon">${{icon}}</span><span class="vc-text">${{s.destination}}</span><span class="vc-tag ${{cls}}">${{tag}}</span><span class="vc-detail">${{detail}}</span></a>`;
+    }}).join('');
+  }} catch (e) {{}} // keep static fallback on error
+}})();
+
 // ── Travel detection for search input ──
-const travelWords = ['hotel','stay','airbnb','booking','resort','hostel',
+const travelCities = ['hotel','hotels','stay','airbnb','booking','resort','hostel',
   'villa','cabin','cottage','per night','/night','guest house','check-in','checkout',
   'check in','check out','vacation rental','bed and breakfast','b&b'];
-const travelCities = ['new york','nyc','tampa','miami','los angeles','chicago','seattle','boston','san francisco',
-  'austin','denver','nashville','orlando','vegas','atlanta','portland','dallas','houston',
-  'london','paris','tokyo','barcelona','rome','dubai','bali','cancun','hawaii','maui',
-  'phoenix','san diego'];
 const shoppingWords = ['phone','laptop','tv','headphone','camera','tablet','monitor','keyboard','mouse',
   'shoes','sneakers','dress','jacket','jeans','shirt','watch','ring','necklace',
   'sofa','couch','mattress','desk','chair','table','lamp','rug',
@@ -1285,6 +1465,7 @@ const shoppingWords = ['phone','laptop','tv','headphone','camera','tablet','moni
   'stroller','car seat','toy','game','console','playstation','xbox','nintendo',
   'best buy','amazon','walmart','target','costco','ebay'];
 let travelMode = false;
+let selectedType = null; // Track autocomplete selection type
 
 function checkTravelMode() {{
   const q = document.getElementById('search-input').value.toLowerCase();
@@ -1296,8 +1477,10 @@ function checkTravelMode() {{
     }}
     return;
   }}
-  const isShopping = shoppingWords.some(w => q.includes(w));
-  const isTravel = !isShopping && (travelWords.some(w => q.includes(w)) || travelCities.some(w => q.includes(w)));
+  // If user selected a city/region/island from autocomplete, it's travel
+  const isCitySelection = selectedType && selectedType !== 'product';
+  const isShopping = !isCitySelection && shoppingWords.some(w => q.includes(w));
+  const isTravel = isCitySelection || (!isShopping && travelCities.some(w => q.includes(w)));
   if (isTravel !== travelMode) {{
     travelMode = isTravel;
     document.getElementById('travel-filters').style.display = isTravel ? 'block' : 'none';
@@ -1310,56 +1493,8 @@ document.getElementById('search-input').addEventListener('focus', checkTravelMod
 checkTravelMode();
 
 // ── Destination autocomplete ──
-const destinations = [
-  {{ name: "New York", region: "New York, United States", icon: "📍", type: "city" }},
-  {{ name: "Manhattan", region: "New York, NY", icon: "📍", type: "neighborhood" }},
-  {{ name: "Brooklyn", region: "New York, NY", icon: "📍", type: "neighborhood" }},
-  {{ name: "Los Angeles", region: "California, United States", icon: "📍", type: "city" }},
-  {{ name: "San Francisco", region: "California, United States", icon: "📍", type: "city" }},
-  {{ name: "San Diego", region: "California, United States", icon: "📍", type: "city" }},
-  {{ name: "Chicago", region: "Illinois, United States", icon: "📍", type: "city" }},
-  {{ name: "Miami", region: "Florida, United States", icon: "📍", type: "city" }},
-  {{ name: "Miami Beach", region: "Florida, United States", icon: "📍", type: "city" }},
-  {{ name: "Tampa", region: "Florida, United States", icon: "📍", type: "city" }},
-  {{ name: "Orlando", region: "Florida, United States", icon: "📍", type: "city" }},
-  {{ name: "Fort Lauderdale", region: "Florida, United States", icon: "📍", type: "city" }},
-  {{ name: "Key West", region: "Florida, United States", icon: "📍", type: "city" }},
-  {{ name: "Seattle", region: "Washington, United States", icon: "📍", type: "city" }},
-  {{ name: "Boston", region: "Massachusetts, United States", icon: "📍", type: "city" }},
-  {{ name: "Austin", region: "Texas, United States", icon: "📍", type: "city" }},
-  {{ name: "Dallas", region: "Texas, United States", icon: "📍", type: "city" }},
-  {{ name: "Houston", region: "Texas, United States", icon: "📍", type: "city" }},
-  {{ name: "Denver", region: "Colorado, United States", icon: "📍", type: "city" }},
-  {{ name: "Nashville", region: "Tennessee, United States", icon: "📍", type: "city" }},
-  {{ name: "Las Vegas", region: "Nevada, United States", icon: "📍", type: "city" }},
-  {{ name: "Atlanta", region: "Georgia, United States", icon: "📍", type: "city" }},
-  {{ name: "Portland", region: "Oregon, United States", icon: "📍", type: "city" }},
-  {{ name: "Phoenix", region: "Arizona, United States", icon: "📍", type: "city" }},
-  {{ name: "Scottsdale", region: "Arizona, United States", icon: "📍", type: "city" }},
-  {{ name: "New Orleans", region: "Louisiana, United States", icon: "📍", type: "city" }},
-  {{ name: "Washington DC", region: "District of Columbia", icon: "📍", type: "city" }},
-  {{ name: "Philadelphia", region: "Pennsylvania, United States", icon: "📍", type: "city" }},
-  {{ name: "Savannah", region: "Georgia, United States", icon: "📍", type: "city" }},
-  {{ name: "Charleston", region: "South Carolina, United States", icon: "📍", type: "city" }},
-  {{ name: "Honolulu", region: "Hawaii, United States", icon: "🏝️", type: "city" }},
-  {{ name: "Maui", region: "Hawaii, United States", icon: "🏝️", type: "island" }},
-  {{ name: "Lake Tahoe", region: "California / Nevada", icon: "🏔️", type: "region" }},
-  {{ name: "Aspen", region: "Colorado, United States", icon: "🏔️", type: "city" }},
-  {{ name: "Park City", region: "Utah, United States", icon: "🏔️", type: "city" }},
-  {{ name: "Myrtle Beach", region: "South Carolina, United States", icon: "🏖️", type: "city" }},
-  {{ name: "Napa Valley", region: "California, United States", icon: "🍷", type: "region" }},
-  {{ name: "Palm Springs", region: "California, United States", icon: "🌴", type: "city" }},
-  {{ name: "London", region: "United Kingdom", icon: "📍", type: "city" }},
-  {{ name: "Paris", region: "France", icon: "📍", type: "city" }},
-  {{ name: "Barcelona", region: "Spain", icon: "📍", type: "city" }},
-  {{ name: "Rome", region: "Italy", icon: "📍", type: "city" }},
-  {{ name: "Amsterdam", region: "Netherlands", icon: "📍", type: "city" }},
-  {{ name: "Tokyo", region: "Japan", icon: "📍", type: "city" }},
-  {{ name: "Bali", region: "Indonesia", icon: "🏝️", type: "island" }},
-  {{ name: "Dubai", region: "United Arab Emirates", icon: "📍", type: "city" }},
-  {{ name: "Cancun", region: "Mexico", icon: "🏖️", type: "city" }},
-  {{ name: "Toronto", region: "Ontario, Canada", icon: "📍", type: "city" }},
-  {{ name: "Vancouver", region: "British Columbia, Canada", icon: "📍", type: "city" }},
+// Static product suggestions only — locations come from geocoding API
+const productSuggestions = [
   {{ name: "Laptops", region: "Electronics · Computers", icon: "💻", type: "product" }},
   {{ name: "Headphones", region: "Electronics · Audio", icon: "🎧", type: "product" }},
   {{ name: "TVs", region: "Electronics · Displays", icon: "📺", type: "product" }},
@@ -1370,21 +1505,20 @@ const destinations = [
   {{ name: "Robot Vacuums", region: "Home · Cleaning", icon: "🤖", type: "product" }},
   {{ name: "Air Fryers", region: "Home · Kitchen", icon: "🍳", type: "product" }},
   {{ name: "Standing Desks", region: "Home · Office", icon: "🪑", type: "product" }},
+  {{ name: "Cameras", region: "Electronics · Photography", icon: "📷", type: "product" }},
+  {{ name: "Watches", region: "Fashion · Accessories", icon: "⌚", type: "product" }},
 ];
 
 const acInput = document.getElementById('search-input');
 const acDropdown = document.getElementById('ac-dropdown');
 let acActive = -1;
+let geoTimer = null;
+let lastGeoQuery = '';
 
-function renderSuggestions(q) {{
-  const lower = q.toLowerCase();
-  if (lower.length < 2) {{ acDropdown.classList.remove('open'); return; }}
-  const matches = destinations.filter(d =>
-    d.name.toLowerCase().includes(lower) || d.region.toLowerCase().includes(lower)
-  ).slice(0, 7);
-  if (matches.length === 0) {{ acDropdown.classList.remove('open'); return; }}
+function renderDropdown(items) {{
+  if (items.length === 0) {{ acDropdown.classList.remove('open'); return; }}
   acActive = -1;
-  acDropdown.innerHTML = matches.map((d, i) => `
+  acDropdown.innerHTML = items.map((d, i) => `
     <div class="ac-item" data-idx="${{i}}" data-name="${{d.name}}" data-region="${{d.region}}" data-type="${{d.type}}">
       <div class="ac-icon">${{d.icon}}</div>
       <div class="ac-text">
@@ -1396,13 +1530,72 @@ function renderSuggestions(q) {{
   acDropdown.classList.add('open');
 }}
 
-acInput.addEventListener('input', () => {{ renderSuggestions(acInput.value); checkTravelMode(); }});
+async function fetchPlaces(query) {{
+  if (query === lastGeoQuery) return;
+  lastGeoQuery = query;
+  try {{
+    const resp = await fetch(`https://photon.komoot.io/api/?q=${{encodeURIComponent(query)}}&limit=5&lang=en`);
+    const data = await resp.json();
+    const places = (data.features || [])
+      .filter(f => {{
+        const t = f.properties.type;
+        return ['city','town','village','state','county','district','suburb','island','region','administrative'].includes(t);
+      }})
+      .map(f => {{
+        const p = f.properties;
+        const parts = [p.state, p.country].filter(Boolean);
+        return {{
+          name: p.name || p.city || query,
+          region: parts.join(', ') || p.country || '',
+          icon: p.type === 'island' ? '🏝️' : '📍',
+          type: p.type === 'island' ? 'island' : 'city',
+        }};
+      }});
+    // Deduplicate by name+region
+    const seen = new Set();
+    const unique = places.filter(p => {{
+      const key = p.name.toLowerCase() + '|' + p.region.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }});
+    // Merge with product matches
+    const lower = query.toLowerCase();
+    const products = productSuggestions.filter(d =>
+      d.name.toLowerCase().includes(lower)
+    ).slice(0, 3);
+    renderDropdown([...unique, ...products].slice(0, 7));
+  }} catch {{
+    // Fallback: just show product matches
+    const lower = query.toLowerCase();
+    const products = productSuggestions.filter(d =>
+      d.name.toLowerCase().includes(lower)
+    ).slice(0, 5);
+    if (products.length > 0) renderDropdown(products);
+  }}
+}}
+
+function renderSuggestions(q) {{
+  const lower = q.toLowerCase();
+  if (lower.length < 2) {{ acDropdown.classList.remove('open'); return; }}
+  // Immediately show product matches
+  const products = productSuggestions.filter(d =>
+    d.name.toLowerCase().includes(lower)
+  ).slice(0, 3);
+  if (products.length > 0) renderDropdown(products);
+  // Debounce geocoding API call (300ms)
+  clearTimeout(geoTimer);
+  geoTimer = setTimeout(() => fetchPlaces(q), 300);
+}}
+
+acInput.addEventListener('input', () => {{ selectedType = null; renderSuggestions(acInput.value); checkTravelMode(); }});
 acInput.addEventListener('focus', () => {{ if (acInput.value.length >= 2) renderSuggestions(acInput.value); }});
 
 acDropdown.addEventListener('click', (e) => {{
   const item = e.target.closest('.ac-item');
   if (!item) return;
   acInput.value = item.dataset.name;
+  selectedType = item.dataset.type;
   acDropdown.classList.remove('open');
   checkTravelMode();
 }});
@@ -1412,7 +1605,7 @@ acInput.addEventListener('keydown', (e) => {{
   if (!acDropdown.classList.contains('open') || items.length === 0) return;
   if (e.key === 'ArrowDown') {{ e.preventDefault(); acActive = Math.min(acActive + 1, items.length - 1); items.forEach((it, i) => it.classList.toggle('active', i === acActive)); }}
   else if (e.key === 'ArrowUp') {{ e.preventDefault(); acActive = Math.max(acActive - 1, 0); items.forEach((it, i) => it.classList.toggle('active', i === acActive)); }}
-  else if (e.key === 'Enter' && acActive >= 0) {{ e.preventDefault(); acInput.value = items[acActive].dataset.name; acDropdown.classList.remove('open'); checkTravelMode(); }}
+  else if (e.key === 'Enter' && acActive >= 0) {{ e.preventDefault(); acInput.value = items[acActive].dataset.name; selectedType = items[acActive].dataset.type; acDropdown.classList.remove('open'); checkTravelMode(); }}
   else if (e.key === 'Escape') {{ acDropdown.classList.remove('open'); }}
 }});
 
@@ -1551,30 +1744,34 @@ function affiliateUrl(url) {{
 
 function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   const decisionClass = (d) => {{
-    const dl = d.toLowerCase();
-    if (dl.includes('book') || dl.includes('smart') || dl.includes('buy') || dl.includes('best') || dl.includes('top')) return 'book';
-    if (dl.includes('skip') || dl.includes('avoid')) return 'skip';
-    return 'think';
+    if (d === 'BEST PICK') return 'book';
+    if (d === 'SKIP') return 'skip';
+    return 'book';
   }};
-  // For ranked results: #1 gets "BEST PICK", lowest-ranked with low score gets "SKIP"
+  // All ranked items are NirnAI-vetted. #1 = BEST PICK, rest = no badge (rank speaks).
   const displayDecision = (l, idx) => {{
     if (idx === 0) return 'BEST PICK';
-    if (l.purchase_score >= 70) return 'SMART BUY';
-    if (l.purchase_score < 40) return 'SKIP';
-    return l.decision;
+    if (l.stamp?.stamp === 'AVOID') return 'SKIP';
+    return '';
   }};
-  // Normalize currency: strip non-USD symbols for US destinations, keep original otherwise
+  // Normalize currency: keep original symbol, just clean up duplicates like "$49 EUR"
   const normalizePrice = (price) => {{
     if (!price) return '';
-    // If price has € but query looks like a US city, convert display to $
     const p = price.toString().trim();
-    if (p.startsWith('€') || p.startsWith('EUR')) {{
-      return '$' + p.replace(/^(€|EUR)\s*/, '');
+    // Remove trailing currency codes if a symbol is already present
+    // e.g. "$49 EUR" → "$49", "€120 EUR" → "€120", "₹3,500 INR" → "₹3,500"
+    const cleaned = p.replace(/\s*(USD|EUR|GBP|INR|AUD|CAD|SGD|JPY|THB|AED|MYR|IDR|PHP|VND|KRW|CNY|HKD|TWD|NZD|ZAR|BRL|MXN|COP|CLP|PEN|ARS)$/i, '').trim();
+    // If no currency symbol at start, try to add one based on trailing code
+    const codeMatch = p.match(/(USD|EUR|GBP|INR|AUD|CAD|SGD|JPY|THB|AED|MYR|IDR|PHP|VND|KRW|CNY|HKD|TWD|NZD|ZAR|BRL|MXN|COP|CLP|PEN|ARS)$/i);
+    if (codeMatch && /^[\d,.]/.test(cleaned)) {{
+      const symbols = {{ USD:'$',EUR:'€',GBP:'£',INR:'₹',AUD:'A$',CAD:'C$',SGD:'S$',JPY:'¥',THB:'฿',AED:'د.إ',CNY:'¥',HKD:'HK$',NZD:'NZ$',BRL:'R$',MXN:'MX$',KRW:'₩' }};
+      const sym = symbols[codeMatch[1].toUpperCase()] || codeMatch[1] + ' ';
+      return sym + cleaned;
     }}
-    if (p.startsWith('£') || p.startsWith('GBP')) {{
-      return '$' + p.replace(/^(£|GBP)\s*/, '');
-    }}
-    return p;
+    // If already has a symbol (₹, $, €, £, ¥, etc.), return cleaned
+    if (/^[₹$€£¥฿₩]/.test(cleaned) || /^(A\$|C\$|S\$|HK\$|NZ\$|R\$|MX\$)/.test(cleaned)) return cleaned;
+    // No symbol and no code — just return as-is
+    return cleaned;
   }};
   const dateInfo = [];
   if (checkin) dateInfo.push(checkin);
@@ -1584,13 +1781,13 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
   const filterSummary = [dateLabel, guestsLabel].filter(Boolean).join(' · ');
   const isTravelResult = data.listings.some(l => {{
     const p = (l.platform || '').toLowerCase();
-    return ['airbnb','booking','expedia','vrbo','hotels','tripadvisor'].some(s => p.includes(s));
+    return ['airbnb','booking','expedia','vrbo','hotels','tripadvisor','makemytrip','goibibo','ixigo','cleartrip','yatra','easemytrip'].some(s => p.includes(s));
   }});
   let html = `<div class="inv-header"><h4>🛡️ NirnAI-verified ${{isTravelResult ? 'stays in' : 'results for'}} ${{query}}</h4><span class="inv-badge">FROM INVENTORY</span></div>`;
   if (filterSummary) html += `<div style="font-size:12px;color:#f59e0b;margin:-4px 0 10px 0;">📅 ${{filterSummary}} — check availability on each listing</div>`;
   data.listings.forEach((l, idx) => {{
     const plat = (l.platform || '').toLowerCase();
-    const isTravel = ['airbnb','booking','expedia','vrbo','hotels','tripadvisor'].some(s => plat.includes(s));
+    const isTravel = ['airbnb','booking','expedia','vrbo','hotels','tripadvisor','makemytrip','goibibo','ixigo','cleartrip','yatra','easemytrip'].some(s => plat.includes(s));
     let bookingLink = l.url || (isTravel ? `https://www.${{l.platform||'airbnb'}}.com/s/${{encodeURIComponent(query)}}/homes` : `https://www.${{l.platform||'amazon'}}.com/s?k=${{encodeURIComponent(query)}}`);
     if (l.url) {{
       const sep = l.url.includes('?') ? '&' : '?';
@@ -1602,11 +1799,15 @@ function buildInventoryHTML(data, query, checkin, checkout, guests) {{
     }}
     bookingLink = affiliateUrl(bookingLink);
     let linkLabel;
-    if (l.url) linkLabel = isTravel ? 'Check Availability →' : 'View Deal →';
-    else {{ const pName = l.platform || (isTravel ? 'airbnb' : 'amazon'); linkLabel = `Search on ${{pName.charAt(0).toUpperCase()+pName.slice(1)}} →`; }}
+    if (l.url) {{
+      const pName = (l.platform || '').toLowerCase();
+      const siteName = pName.charAt(0).toUpperCase() + pName.slice(1);
+      linkLabel = isTravel ? `Book on ${{siteName}} →` : `Buy on ${{siteName}} →`;
+    }} else {{ const pName = l.platform || (isTravel ? 'airbnb' : 'amazon'); linkLabel = `Search on ${{pName.charAt(0).toUpperCase()+pName.slice(1)}} →`; }}
     const decision = displayDecision(l, idx);
     const price = normalizePrice(l.price);
-    html += `<div class="inv-card"><div class="rank">#${{l.rank}}</div>${{l.image_url ? `<img src="${{l.image_url}}" class="inv-thumb" alt="" />` : ''}}<div class="info"><div class="title">${{l.title}}</div><div class="meta">${{l.platform}} · Score: ${{l.purchase_score}}/100 · ${{l.confidence_tier}} confidence</div><span class="score ${{decisionClass(decision)}}">${{decision}}</span><div style="margin-top:4px;font-size:11px;color:#8a94a8;">${{l.why_ranked}}</div><a href="${{bookingLink}}" target="_blank" rel="noopener" class="inv-cta">${{linkLabel}}</a></div><div class="price-tag">${{price}}</div></div>`;
+    const badgeHtml = decision ? `<span class="score ${{decisionClass(decision)}}">${{decision}}</span>` : '';
+    html += `<div class="inv-card"><div class="rank">#${{idx + 1}}</div>${{l.image_url ? `<img src="${{l.image_url}}" class="inv-thumb" alt="" />` : ''}}<div class="info"><div class="title">${{l.title}}</div><div class="meta">${{l.platform}} · Score: ${{l.purchase_score}}/100 · ${{l.confidence_tier}} confidence</div>${{badgeHtml}}<div style="margin-top:4px;font-size:11px;color:#8a94a8;">${{l.why_ranked}}</div><a href="${{bookingLink}}" target="_blank" rel="noopener" class="inv-cta">${{linkLabel}}</a></div><div class="price-tag">${{price}}</div></div>`;
   }});
   html += `<div class="inv-fresh">${{data.freshness_note}}</div>`;
   return html;
@@ -1616,8 +1817,8 @@ function buildSearchGuideHTML(guide, query, hasInventory, checkin, checkout, gue
   const cat = guide.category === 'travel' ? '🏠' : '🛒';
   const heading = hasInventory ? 'Browse more options on these platforms' : `Search: ${{query}}`;
   const subtext = hasInventory
-    ? `Check prices and availability${{checkin ? ' for your dates' : ''}} across platforms. Install the <strong style="color:#f5c542;">NirnAI extension</strong> for automatic rankings.`
-    : `No NirnAI-verified results yet. Browse any platform with the <strong style="color:#f5c542;">NirnAI extension</strong> — it will automatically rank the best options.`;
+    ? `Check trust and availability${{checkin ? ' for your dates' : ''}} across platforms. Install the <strong style="color:#f5c542;">NirnAI extension</strong> for confidence-rated rankings.`
+    : `No NirnAI-verified results yet. Browse any platform with the <strong style="color:#f5c542;">NirnAI extension</strong> — it will analyze trust and rank the safest options.`;
   let html = `<div style="background:#0f1525; border:1px solid #1a2340; border-radius:12px; padding:24px; margin-top:${{hasInventory ? '20' : '12'}}px;">
     <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="font-size:24px;">${{cat}}</span><h4 style="color:#e8ecf4; margin:0; font-size:16px;">${{heading}}</h4></div>
     <p style="color:#8a94a8; font-size:13px; margin:4px 0 16px 0;">${{subtext}}</p>

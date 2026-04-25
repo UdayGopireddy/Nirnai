@@ -592,7 +592,8 @@ fn detect_site(url: &str) -> String {
 }
 
 fn is_travel(source: &str) -> bool {
-    matches!(source, "airbnb" | "booking" | "expedia" | "vrbo" | "hotels" | "tripadvisor")
+    matches!(source, "airbnb" | "booking" | "expedia" | "vrbo" | "hotels" | "tripadvisor"
+        | "agoda" | "makemytrip" | "goibibo" | "ixigo" | "cleartrip" | "yatra" | "easemytrip")
 }
 
 /// Extract search context from Airbnb/travel URL parameters.

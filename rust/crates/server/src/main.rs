@@ -48,6 +48,7 @@ async fn main() {
         .route("/analyze-batch", post(nirnai::analyze_batch))
         .route("/analyze/fast", post(proxy::proxy))
         .route("/analyze/ai", post(proxy::proxy))
+        .route("/products/recheck", post(proxy::proxy))
         .route("/whatsapp/webhook", get(proxy::proxy).post(proxy::proxy))
         .route("/compare/start", post(compare::start_compare))
         .route("/compare/{id}", get(compare::compare_page))

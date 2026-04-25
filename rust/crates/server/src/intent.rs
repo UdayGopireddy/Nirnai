@@ -178,6 +178,7 @@ pub async fn intent_link(
         &state.inventory,
         vec![listing],
         context_parts.join(""),
+        None,
     )
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))))?;
@@ -278,6 +279,12 @@ pub async fn intent_search(
             json!({ "platform": "VRBO", "url": affiliate_url(&vrbo_url, "vrbo"), "icon": "🏡" }),
             json!({ "platform": "Hotels.com", "url": affiliate_url(&hotels_url, "hotels"), "icon": "🛏️" }),
             json!({ "platform": "TripAdvisor", "url": affiliate_url(&format!("https://www.tripadvisor.com/Search?q={}", encoded), "tripadvisor"), "icon": "📍" }),
+            json!({ "platform": "MakeMyTrip", "url": format!("https://www.makemytrip.com/hotels/hotel-listing/?searchText={}", encoded), "icon": "🇮🇳" }),
+            json!({ "platform": "Goibibo", "url": format!("https://www.goibibo.com/hotels/hotels-in-{}-ct/", encoded), "icon": "🏨" }),
+            json!({ "platform": "Ixigo", "url": format!("https://www.ixigo.com/search/result/hotel?city={}", encoded), "icon": "🔍" }),
+            json!({ "platform": "Cleartrip", "url": format!("https://www.cleartrip.com/hotels/results?city={}", encoded), "icon": "✈️" }),
+            json!({ "platform": "Yatra", "url": format!("https://www.yatra.com/hotels/search/result?searchCriteria={}", encoded), "icon": "🗺️" }),
+            json!({ "platform": "EaseMyTrip", "url": format!("https://www.easemytrip.com/hotels/search?city={}", encoded), "icon": "💰" }),
         ]
     } else {
         vec![
@@ -411,7 +418,7 @@ pub async fn intent_compare(
         );
     }
 
-    let resp = compare::create_compare_session(&state.sessions, &state.inventory, listings, context)
+    let resp = compare::create_compare_session(&state.sessions, &state.inventory, listings, context, None)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))))?;
 
