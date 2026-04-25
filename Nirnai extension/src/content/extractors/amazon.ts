@@ -21,6 +21,56 @@ function extractText(selectors: string[]): string {
   return "";
 }
 
+/**
+ * Pull a clean, decimal-correct price from Amazon's price block.
+ *
+ * Amazon ships prices as either:
+ *   1. `.a-offscreen` — the screen-reader copy, "₹399.00" or "$12.99". Best.
+ *   2. The visible block — `.a-price-symbol` + `.a-price-whole` + a CSS-inserted
+ *      decimal + `.a-price-fraction`. textContent often loses the decimal,
+ *      collapsing "₹399.00" to "₹39900" — exactly the bug seen on amazon.in.
+ *
+ * Strategy: try `.a-offscreen` first. If empty (lazy-hydrated or stripped),
+ * rebuild from the structured spans so the decimal is always present.
+ */
+function extractAmazonPrice(): string {
+  // 1. Screen-reader price — always correct when present.
+  const offscreen = document.querySelector(
+    "#corePriceDisplay_desktop_feature_div .a-offscreen, " +
+    "#corePrice_feature_div .a-offscreen, " +
+    "#apex_desktop .a-offscreen, " +
+    ".a-price:not(.a-text-price) .a-offscreen"
+  );
+  const offscreenText = offscreen?.textContent?.trim() || "";
+  if (offscreenText && /\d/.test(offscreenText)) return offscreenText;
+
+  // 2. Reconstruct from the visible spans. We pick the first non-text-price
+  //    block (text-price is the strikethrough M.R.P. — never the buy price).
+  const block = document.querySelector(".a-price:not(.a-text-price)");
+  if (block) {
+    const symbol = block.querySelector(".a-price-symbol")?.textContent?.trim() || "";
+    // .a-price-whole on amazon.in often wraps an inner .a-price-decimal span,
+    // so its textContent ends with a stray period. Strip non-digits to get the
+    // integer rupee part cleanly.
+    const wholeRaw = block.querySelector(".a-price-whole")?.textContent?.trim() || "";
+    const whole = wholeRaw.replace(/[^\d,]/g, "");
+    const fraction = block.querySelector(".a-price-fraction")?.textContent?.trim().replace(/\D/g, "") || "";
+    if (whole) {
+      return fraction ? `${symbol}${whole}.${fraction}` : `${symbol}${whole}`;
+    }
+  }
+
+  // 3. Legacy selectors as a last resort.
+  return extractText([
+    "#priceblock_ourprice",
+    "#priceblock_dealprice",
+    "#price_inside_buybox",
+    "#newBuyBoxPrice",
+    '[data-testid="price-value"]',
+    ".reinventPricePriceToPayMargin .a-offscreen",
+  ]);
+}
+
 export class AmazonExtractor implements SiteExtractor {
   siteName(): string {
     return "amazon";
@@ -152,17 +202,7 @@ export class AmazonExtractor implements SiteExtractor {
       .replace(/^by\s+/i, "")
       .trim();
 
-    const price = extractText([
-      ".a-price .a-offscreen",
-      "#priceblock_ourprice",
-      "#priceblock_dealprice",
-      ".a-price-whole",
-      "#price_inside_buybox",
-      "#newBuyBoxPrice",
-      '[data-testid="price-value"]',
-      ".a-price span[aria-hidden=true]",
-      ".reinventPricePriceToPayMargin .a-offscreen",
-    ]);
+    const price = extractAmazonPrice();
 
     const rating = extractText([
       "#acrPopover .a-icon-alt",

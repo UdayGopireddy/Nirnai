@@ -690,6 +690,29 @@ def _parse_price_number(raw: str) -> float:
     return 0.0
 
 
+def _currency_symbol(raw: str) -> str:
+    """Extract the currency symbol/code from a price string.
+
+    Returns one of: "INR", "USD", "EUR", "GBP", "JPY", "" (unknown).
+    Used to gate cross-currency price comparisons — comparing ₹399 to $12 is
+    meaningless without an FX rate, so we suppress the delta chip in that case.
+    """
+    if not raw:
+        return ""
+    s = raw.strip()
+    if "₹" in s or s.upper().startswith(("INR", "RS", "RS.")) or s.upper().endswith(" INR"):
+        return "INR"
+    if "$" in s or s.upper().endswith(" USD") or s.upper().startswith("USD"):
+        return "USD"
+    if "€" in s or s.upper().endswith(" EUR") or s.upper().startswith("EUR"):
+        return "EUR"
+    if "£" in s or s.upper().endswith(" GBP") or s.upper().startswith("GBP"):
+        return "GBP"
+    if "¥" in s or s.upper().endswith(" JPY") or s.upper().startswith("JPY"):
+        return "JPY"
+    return ""
+
+
 def _enrich_dual_track(batch, req, origin_score: int, origin_trust: int,
                         origin_price: str, origin_product) -> None:
     """Populate price_delta_pct, sku_match, seller_*, and tab headlines.
@@ -705,11 +728,21 @@ def _enrich_dual_track(batch, req, origin_score: int, origin_trust: int,
     origin_title = (origin_product.title if origin_product else "") or ""
     origin_brand = (origin_product.brand if origin_product else "") or ""
     origin_price_value = _parse_price_number(origin_price)
+    origin_currency = _currency_symbol(origin_price)
 
     def _enrich_list(items):
         for item in items:
             item.price_value = _parse_price_number(item.price or "")
-            if origin_price_value > 0 and item.price_value > 0:
+            # Only compute a percentage when we can compare like-for-like.
+            # Cross-currency comparisons (₹399 vs $12) are meaningless without
+            # an FX rate and would produce nonsense like "100% cheaper".
+            item_currency = _currency_symbol(item.price or "")
+            same_currency = (
+                origin_currency
+                and item_currency
+                and origin_currency == item_currency
+            )
+            if same_currency and origin_price_value > 0 and item.price_value > 0:
                 delta = (item.price_value - origin_price_value) / origin_price_value
                 item.price_delta_pct = int(round(delta * 100))
             else:
