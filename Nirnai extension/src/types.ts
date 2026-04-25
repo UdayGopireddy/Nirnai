@@ -132,6 +132,11 @@ export interface RankedListing {
 export interface BatchResponse {
   ranked: RankedListing[];
   comparison_summary: string;
+  /**
+   * India dual-track: same listings sorted cheapest-first. Empty for non-India
+   * batches. UI uses this to show a "Best Deal" toggle alongside "Best Pick".
+   */
+  ranked_by_price?: RankedListing[];
 }
 
 export interface AnalysisResponse {

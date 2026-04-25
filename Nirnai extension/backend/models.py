@@ -191,6 +191,10 @@ class RankedListing(BaseModel):
 class BatchResponse(BaseModel):
     ranked: list[RankedListing]
     comparison_summary: str = ""
+    # India dual-track: when the batch is identified as Indian, we ALSO return a
+    # parallel ordering by ascending price (Indian shoppers split-screen the
+    # \"best quality\" vs \"best deal\" decision). Empty/omitted for other markets.
+    ranked_by_price: list[RankedListing] = []
     # Origin product baseline — set when ranking alternatives so the frontend
     # can show "vs your current product" context.
     origin_title: str = ""

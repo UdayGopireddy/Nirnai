@@ -137,12 +137,20 @@ export class AmazonExtractor implements SiteExtractor {
       "h1",
     ]);
 
-    const brand = extractText([
+    const rawBrand = extractText([
       "#bylineInfo",
       "#brand",
       '[data-testid="brand-link"]',
       ".luxury-brand-name",
     ]);
+    // Scrub Amazon's byline boilerplate so "Visit the NIVEA Store" surfaces as
+    // just "NIVEA" everywhere downstream (popup, scoring, alternative search).
+    const brand = rawBrand
+      .replace(/^Visit the\s+/i, "")
+      .replace(/\s+Store$/i, "")
+      .replace(/^Brand:\s*/i, "")
+      .replace(/^by\s+/i, "")
+      .trim();
 
     const price = extractText([
       ".a-price .a-offscreen",

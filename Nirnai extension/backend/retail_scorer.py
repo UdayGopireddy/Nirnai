@@ -471,12 +471,19 @@ def detect_risk_flags(product: ProductData, review_trust: ReviewTrust) -> list[s
             risks.append("Near-perfect rating — possible fake reviews")
 
     if brand and seller:
-        is_premium = any(b in brand for b in KNOWN_BRANDS)
+        # Scrub Amazon’s “Visit the X Store” / trailing “Store” / “Brand:” boilerplate
+        # before doing the substring check; otherwise NIVEA-as-seller looks
+        # “unknown” simply because brand text is “visit the nivea store”.
+        import re as _re
+        clean_brand = _re.sub(r"^visit the\s+", "", brand)
+        clean_brand = _re.sub(r"\s+store$", "", clean_brand)
+        clean_brand = _re.sub(r"^brand:\s*", "", clean_brand).strip()
+        is_premium = any(b in clean_brand for b in KNOWN_BRANDS)
         is_known_seller = any(t in seller for t in [
-            "amazon", "walmart", "target", "official", "authorized", brand,
+            "amazon", "walmart", "target", "official", "authorized", clean_brand,
         ])
         if is_premium and not is_known_seller:
-            risks.append(f"Premium brand ({product.brand}) sold by unverified seller")
+            risks.append(f"Premium brand ({clean_brand or product.brand}) sold by unverified seller")
 
     if not product.price:
         risks.append("No price information available")
@@ -609,7 +616,17 @@ def generate_stamp(
             lower_ceiling("CAUTION", "Very few reviews")
 
     # ── GATE 3: SAFETY — "Is it safe?" (food / personal care) ──
-    if (is_food or is_personal_care) and health_score > 0:
+    # Only fire when we actually have ingredient/nutrition data on hand. For
+    # personal-care pages where the seller didn’t list ingredients (very common
+    # on amazon.in deodorants / soaps), a default 50 health score is a data
+    # gap, not a real “moderate concern” — silently skipping is more honest.
+    has_health_data = bool(
+        (product is not None) and (
+            (product.ingredients or "").strip()
+            or (product.nutritionInfo or "").strip()
+        )
+    )
+    if (is_food or is_personal_care) and health_score > 0 and has_health_data:
         if health_score < 30:
             lower_ceiling("SKIP", "Harmful ingredients detected")
         elif health_score < 45:

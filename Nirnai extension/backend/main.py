@@ -952,36 +952,51 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
                                 item.price, fixed, item.title[:40])
                     item.price = fixed
 
-    # Re-rank to correct AI misjudgments. Sort key is country-aware:
-    # • US / default: purchase_score descending (quality-first ranking)
-    # • IN: effective price ascending (Indian shoppers decide on price first;
-    #   the purchase_score is still kept for the BEST PICK / SKIP stamps but
-    #   does not drive the *order* of alternatives).
+    # Re-rank to correct AI misjudgments. India batches get a dual track:
+    # • `ranked`           — quality-first (purchase_score desc), same as US.
+    # • `ranked_by_price`  — same listings reordered cheapest-first so the
+    #   extension UI can show a side-by-side "Best Pick" / "Best Deal" toggle.
+    # US / default batches only get `ranked`; `ranked_by_price` stays empty.
     if batch.ranked:
         is_india_batch = any(
             ((l.country or "").upper() == "IN")
             or ((getattr(l, "country_code", "") or "").upper() == "IN")
             for l in (req.listings or [])
         )
+
+        # Always sort `ranked` by quality (purchase_score) so the existing UI
+        # path that consumes `ranked` keeps showing the highest-scoring item.
+        batch.ranked.sort(key=lambda x: x.purchase_score, reverse=True)
+        for i, item in enumerate(batch.ranked):
+            item.rank = i + 1
+
         if is_india_batch:
             from india_pricing import parse_inr
             from hospitality_scorer import _parse_price as _pp
 
             def _india_sort_key(item):
-                # Prefer INR parser; fall back to generic price parser.
+                # Prefer INR parser; fall back to generic price parser. Items
+                # with no parseable price sink to the bottom so they never
+                # claim slot #1 just because of a missing field.
                 v = parse_inr(item.price or "")
                 if not v or v <= 0:
                     v = _pp(item.price or "") or 0.0
-                # Items with no parseable price sink to the bottom so they
-                # never claim the #1 slot just because of a missing field.
                 return v if v > 0 else float("inf")
 
-            batch.ranked.sort(key=_india_sort_key)
-            logger.info("India batch: ranked %d listings by price ascending", len(batch.ranked))
-        else:
-            batch.ranked.sort(key=lambda x: x.purchase_score, reverse=True)
-        for i, item in enumerate(batch.ranked):
-            item.rank = i + 1
+            # Build a price-ordered copy without mutating `ranked`. Re-rank
+            # numbers within `ranked_by_price` so the UI can render 1..N.
+            price_sorted = sorted(batch.ranked, key=_india_sort_key)
+            cloned = []
+            for i, item in enumerate(price_sorted):
+                # Pydantic .model_copy keeps the same nested objects but lets
+                # us assign a fresh `rank` without mutating the quality list.
+                c = item.model_copy(update={"rank": i + 1})
+                cloned.append(c)
+            batch.ranked_by_price = cloned
+            logger.info(
+                "India batch: %d listings ranked by quality and price (dual)",
+                len(batch.ranked),
+            )
 
     # ── Origin-gating: cap alternatives that are WORSE than the original ──
     # If the user is browsing a product with Trust 79 / Purchase 68, an alternative
