@@ -1717,6 +1717,16 @@ fn build_compare_html(session_id: &str) -> String {
       // first) alongside the default quality-ordered `ranked`. The toggle is
       // only rendered when the price track is non-empty.
       const _hasPriceTrack = Array.isArray(batch.ranked_by_price) && batch.ranked_by_price.length > 0;
+      // Seed initial mode from the URL hash on first render so the extension
+      // can deep-link straight to "Best Deal" via #tab=price. Subsequent
+      // toggles set window._rankMode directly.
+      if (_hasPriceTrack && window._rankMode === undefined) {{
+        try {{
+          if ((location.hash || "").toLowerCase().includes("price")) {{
+            window._rankMode = "price";
+          }}
+        }} catch (_e) {{}}
+      }}
       const _mode = (_hasPriceTrack && window._rankMode === "price") ? "price" : "quality";
       const ranked = (_mode === "price") ? batch.ranked_by_price : (batch.ranked || []);
       // Cache the latest payload so the tab toggle can re-render without a

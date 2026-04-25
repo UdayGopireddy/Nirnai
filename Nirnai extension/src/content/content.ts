@@ -478,7 +478,7 @@ function injectAiSections(
       <div style="background:#111827;border-radius:12px;padding:12px 14px;border:1px solid #1e293b;">
         <div style="font-size:12px;font-weight:700;color:#818cf8;margin-bottom:4px;">${suggestion.product_name}</div>
         <div style="font-size:10px;line-height:1.45;color:#94a3b8;margin-bottom:10px;">${suggestion.reason}</div>
-        <div id="nirnai-suggestion-rank" data-url="${suggestion.search_url || ""}" data-name="${suggestion.product_name}" data-domain="${fullAnalysis?.domain || ""}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
+        ${rankAlternativesButtonsHtml(suggestion.product_name, suggestion.search_url || "", fullAnalysis?.domain || "")}
       </div>
     `;
     footer.insertAdjacentElement("beforebegin", suggDiv);
@@ -581,7 +581,7 @@ function showResultPanel(analysis: AnalysisResponse): void {
       <div style="background:#111827;border-radius:12px;padding:12px 14px;border:1px solid #1e293b;">
         <div style="font-size:12px;font-weight:700;color:#818cf8;margin-bottom:4px;">${analysis.suggestion.product_name}</div>
         <div style="font-size:10px;line-height:1.45;color:#94a3b8;margin-bottom:10px;">${analysis.suggestion.reason}</div>
-        <div id="nirnai-suggestion-rank" data-url="${analysis.suggestion.search_url}" data-name="${analysis.suggestion.product_name}" data-domain="${analysis.domain || ""}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
+        ${rankAlternativesButtonsHtml(analysis.suggestion.product_name, analysis.suggestion.search_url, analysis.domain || "")}
       </div>
     </div>` : ""}
     <div style="padding:10px 18px;border-top:1px solid #1e293b;display:flex;align-items:center;gap:8px;">
@@ -706,13 +706,67 @@ const FILLER_WORDS = new Set([
 ]);
 const SIZE_PATTERN = /^(\d+\.?\d*)(oz|ml|mg|g|kg|lb|ct|pk|pc|in|cm|mm|fl)$/i;
 
+// ── Dual-track entry point ────────────────────────────────────────────────
+// The compare page renders two tabs (Best Pick / Best Deal) for India batches.
+// Surfacing the choice BEFORE we run the cross-site search lets the user tell
+// us their intent up front and lands them directly on the right tab. For
+// non-India hosts we keep the single "Rank alternatives" button — there's
+// nothing to choose between.
+function isIndiaHost(): boolean {
+  const h = window.location.hostname.toLowerCase();
+  return h.endsWith(".in") || h.includes("flipkart.com") || h.includes("nykaa.com")
+      || h.includes("myntra.com") || h.includes("tatacliq.com") || h.includes("snapdeal.com")
+      || h.includes("ajio.com") || h.includes("meesho.com") || h.includes("bigbasket.com");
+}
+
+/**
+ * Renders either the single legacy "Rank alternatives" button or, on India
+ * platforms, a pair of pills letting the user choose Best Pick vs Best Deal.
+ * Both pills share the existing #nirnai-suggestion-rank handler — `data-mode`
+ * carries the user's intent through to the compare page.
+ */
+function rankAlternativesButtonsHtml(productName: string, searchUrl: string, domain: string): string {
+  const baseAttrs = `data-url="${searchUrl}" data-name="${productName}" data-domain="${domain}"`;
+  const baseStyle = "display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;";
+
+  if (!isIndiaHost()) {
+    return `<div id="nirnai-suggestion-rank" ${baseAttrs} data-mode="quality"
+      style="${baseStyle}background:#6366f1;box-shadow:0 2px 8px rgba(99,102,241,0.3);"
+      onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'"
+      onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">
+      🏆 Rank alternatives</div>`;
+  }
+
+  // India: two pills. Same id on the first so existing handler attaches; the
+  // second gets a sibling id and shares the click flow via querySelectorAll.
+  return `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <div id="nirnai-suggestion-rank" class="nirnai-rank-btn" ${baseAttrs} data-mode="quality"
+        style="${baseStyle}background:#6366f1;box-shadow:0 2px 8px rgba(99,102,241,0.3);"
+        onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'"
+        onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'"
+        title="Find higher-scoring alternatives across platforms">🏆 Best Pick</div>
+      <div id="nirnai-suggestion-rank-price" class="nirnai-rank-btn" ${baseAttrs} data-mode="price"
+        style="${baseStyle}background:#16a34a;box-shadow:0 2px 8px rgba(22,163,74,0.3);"
+        onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(22,163,74,0.4)'"
+        onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(22,163,74,0.3)'"
+        title="Find the same product at the best price across platforms">💰 Best Deal</div>
+    </div>`;
+}
+
 /** Attach click handler to #nirnai-suggestion-rank. Safe to call multiple times — idempotent. */
 function attachRankAlternativesHandler(): void {
-  const el = document.getElementById("nirnai-suggestion-rank");
-  if (!el || (el as any).__nirnaiHandlerAttached) return;
-  (el as any).__nirnaiHandlerAttached = true;
+  // Both India pills share the same handler — we just read data-mode off the
+  // clicked element to know which tab to land on.
+  const els = Array.from(document.querySelectorAll<HTMLElement>(".nirnai-rank-btn, #nirnai-suggestion-rank"));
+  for (const el of els) {
+    if ((el as any).__nirnaiHandlerAttached) continue;
+    (el as any).__nirnaiHandlerAttached = true;
+    el.addEventListener("click", onRankAlternativesClick);
+  }
+}
 
-  el.addEventListener("click", (e) => {
+function onRankAlternativesClick(e: Event): void {
     const btn = e.currentTarget as HTMLElement;
     const productName = btn.dataset.name || "";
     if (!productName) return;
@@ -925,8 +979,11 @@ function attachRankAlternativesHandler(): void {
       includeOrigin: true,
       siteCategory,
       productDomain: backendDomain || "",
+      // "quality" → land on Best Pick tab; "price" → land on Best Deal tab.
+      // Backend / Rust gateway use this only as a UI hint (compare URL gets
+      // a #tab=price hash); ranking computation is unaffected.
+      rankMode: (btn.dataset.mode === "price") ? "price" : "quality",
     } as any);
-  });
 }
 
 function showCollapsedBadge(analysis: AnalysisResponse): void {

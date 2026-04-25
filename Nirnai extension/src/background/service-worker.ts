@@ -724,6 +724,10 @@ interface CrossSiteSession {
   sitesReported: Set<string>;
   sourceProfiles: Record<string, SourceProfile>;
   finishing: boolean;                   // guard against double-finish
+  /** UI hint: which tab to land on once the compare page renders.
+   *  "price" → jumps straight to the Best Deal tab via #tab=price hash.
+   *  Anything else → defaults to Best Pick. */
+  rankMode?: "quality" | "price";
 }
 
 let activeCrossSite: CrossSiteSession | null = null;
@@ -1020,7 +1024,12 @@ function finishCrossSiteCollection(): void {
 
   startCompare(finalListings, crossSiteContext, originProduct)
     .then((result) => {
-      const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
+      let compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
+      // Honour the user's chosen tab. The compare page reads location.hash on
+      // first render; everything else (ranked, ranked_by_price) is unaffected.
+      if (session.rankMode === "price" && !compareUrl.includes("#")) {
+        compareUrl += "#tab=price";
+      }
       console.log(`NirnAI: /compare/start returned — navigating to ${compareUrl}`);
       chrome.tabs.update(session.originTabId, { url: compareUrl }).catch(() => {
         chrome.tabs.create({ url: compareUrl });
@@ -1212,6 +1221,7 @@ chrome.runtime.onMessage.addListener(
         sitesReported: new Set(),
         sourceProfiles,
         finishing: false,
+        rankMode: (msg.rankMode === "price") ? "price" : "quality",
       };
 
       // Tell origin tab to show loading overlay with ALL source names
