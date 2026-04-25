@@ -24,6 +24,9 @@ Thumbs.db
 
 # Build artifacts
 nirnai-extension.zip
+nirnai-v*.zip
+NirnAI-v*.zip
+Old zips/
 *.db
 
 # IDE
