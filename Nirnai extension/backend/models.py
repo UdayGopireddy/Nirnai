@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 
@@ -80,6 +80,7 @@ class AnalysisResponse(BaseModel):
     confidence: float  # 0.0 - 1.0
     summary: str = ""
     suggestion: Optional[AlternativeSuggestion] = None
+    domain: str = "general"  # "hospitality" | "electronics" | "fashion" | "grocery" | "home" | "general"
 
 
 class CartItemResult(BaseModel):
@@ -160,14 +161,60 @@ class RankedListing(BaseModel):
     tradeoffs: list[str] = []
     positives: list[str] = []
     warnings: list[str] = []
+    domain: str = "general"  # "hospitality" | "general" etc.
+
+    @field_validator("tradeoffs", "positives", "warnings", mode="before")
+    @classmethod
+    def coerce_to_list(cls, v):
+        if isinstance(v, str):
+            return [v] if v else []
+        return v
 
 
 class BatchResponse(BaseModel):
     ranked: list[RankedListing]
     comparison_summary: str = ""
+    # Origin product baseline — set when ranking alternatives so the frontend
+    # can show "vs your current product" context.
+    origin_title: str = ""
+    origin_purchase_score: int = 0
+    origin_trust_score: int = 0
+    origin_url: str = ""
+    origin_price: str = ""
+    # True when the user's original product beats every alternative we found.
+    # Frontend should recommend "stick with your pick" instead of a worse #1.
+    origin_is_best: bool = False
 
 
 class BatchRankRequest(BaseModel):
     system_prompt: str
     user_prompt: str
     listings: list[ProductData] = []
+    # Optional structured original product (alternatives flow). Preferred over
+    # regex-parsing the prompt because it carries every ProductData field
+    # (ingredients, returnPolicy, seller, etc.) — required for accurate
+    # purchase scoring of the original.
+    origin_product: ProductData | None = None
+
+
+# ── Recheck-at-checkout models ──
+
+class RecheckRequest(BaseModel):
+    """Sent by the extension just before a SMART_BUY click goes through."""
+    product: ProductData
+    shown_price: str = ""
+    threshold_pct: float = 10.0
+
+
+class RecheckResponse(BaseModel):
+    """Returned to the extension. ``warn_level`` drives the inline UI:
+    ``none`` -> open immediately; ``info`` -> small note; ``warn`` -> blocking
+    notice with a confirm button; ``unknown`` -> proceed silently."""
+    product_id: str
+    stable: bool
+    warn_level: str  # "none" | "info" | "warn" | "unknown"
+    message: str
+    last_price: str = ""
+    last_currency: str = ""
+    drift_pct: float | None = None
+    scored_secs_ago: int | None = None
