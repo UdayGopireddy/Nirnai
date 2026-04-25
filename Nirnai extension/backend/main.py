@@ -949,10 +949,34 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
                                 item.price, fixed, item.title[:40])
                     item.price = fixed
 
-    # Re-rank by rule-based purchase_score (descending) to correct AI misjudgments.
-    # This ensures value-for-money and trust signals override any AI brand bias.
+    # Re-rank to correct AI misjudgments. Sort key is country-aware:
+    # • US / default: purchase_score descending (quality-first ranking)
+    # • IN: effective price ascending (Indian shoppers decide on price first;
+    #   the purchase_score is still kept for the BEST PICK / SKIP stamps but
+    #   does not drive the *order* of alternatives).
     if batch.ranked:
-        batch.ranked.sort(key=lambda x: x.purchase_score, reverse=True)
+        is_india_batch = any(
+            ((l.country or "").upper() == "IN")
+            or ((getattr(l, "country_code", "") or "").upper() == "IN")
+            for l in (req.listings or [])
+        )
+        if is_india_batch:
+            from india_pricing import parse_inr
+            from hospitality_scorer import _parse_price as _pp
+
+            def _india_sort_key(item):
+                # Prefer INR parser; fall back to generic price parser.
+                v = parse_inr(item.price or "")
+                if not v or v <= 0:
+                    v = _pp(item.price or "") or 0.0
+                # Items with no parseable price sink to the bottom so they
+                # never claim the #1 slot just because of a missing field.
+                return v if v > 0 else float("inf")
+
+            batch.ranked.sort(key=_india_sort_key)
+            logger.info("India batch: ranked %d listings by price ascending", len(batch.ranked))
+        else:
+            batch.ranked.sort(key=lambda x: x.purchase_score, reverse=True)
         for i, item in enumerate(batch.ranked):
             item.rank = i + 1
 
