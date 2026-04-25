@@ -104,6 +104,8 @@ export class FlipkartExtractor implements SiteExtractor {
       document.querySelector<HTMLImageElement>('._396cs4, img._2r_T1I, ._3kidJX img')?.src || "";
     const category = this.extractCategory();
 
+    const india = this.extractIndiaFields();
+
     return {
       title, brand, price, currency: "INR", rating, reviewCount,
       seller, fulfiller: seller,
@@ -113,7 +115,60 @@ export class FlipkartExtractor implements SiteExtractor {
       barcode: "", source_site: "flipkart", page_type: "product",
       country_code: "IN", currency_code: "INR", locale: "en-IN",
       tax_included: true, shipping_region: "IN", measurement_system: "metric",
+      ...india,
     };
+  }
+
+  /**
+   * Pull India-only signals from a Flipkart product page. All best-effort —
+   * Flipkart class names rotate, so we cast a wide net via attribute selectors
+   * and text-content checks.
+   */
+  private extractIndiaFields(): Partial<ProductData> {
+    // MRP — shown as a struck-through original price near the current price.
+    const mrp = extractText([
+      '._3I9_wc._2p6lqe',
+      'div._3I9_wc',
+      'div[class*="yRaY8j"]',
+      'div._3auQ3N._1POkHg',
+    ]);
+
+    // Bank offers — Flipkart calls them "Available offers" with bullet rows.
+    const bank_offers: string[] = [];
+    document.querySelectorAll('li._16eBzU, li[class*="offer"], div._1qD8wx li').forEach((n) => {
+      const txt = n.textContent?.replace(/\s+/g, " ").trim() || "";
+      if (txt && /bank|card|emi|credit|debit/i.test(txt) && bank_offers.length < 6) {
+        bank_offers.push(txt.slice(0, 240));
+      }
+    });
+
+    // Coupon — Flipkart rarely uses standalone coupons, but some categories do.
+    const coupon = extractText([
+      'div._16FRp0',
+      'div[class*="couponBadge"]',
+    ]);
+
+    // Shipping — explicit "Free Delivery" text or a charge.
+    const shippingText = extractText([
+      'div._3XINqE',
+      'div[class*="delivery"] span',
+      'div._9uvi2y',
+    ]);
+    let shipping_cost = "";
+    if (shippingText) {
+      if (/free/i.test(shippingText)) shipping_cost = "FREE";
+      else {
+        const m = shippingText.match(/₹\s?([\d,]+)/);
+        if (m) shipping_cost = `₹${m[1]}`;
+      }
+    }
+
+    // No-cost EMI badge.
+    const pageText = document.body.innerText || "";
+    const emi_no_cost = /no\s*cost\s*emi/i.test(pageText);
+    const cod_available = /cash\s*on\s*delivery|pay\s*on\s*delivery/i.test(pageText);
+
+    return { mrp, bank_offers, coupon, shipping_cost, emi_no_cost, cod_available };
   }
 
   extractCartProducts(): ProductData[] {

@@ -26,6 +26,14 @@ export interface ProductData {
   tax_included?: boolean;      // true for VAT/GST regions (EU, IN, JP), false for US
   shipping_region?: string;    // "domestic" | "cross-border" | "unknown"
   measurement_system?: string; // "metric" | "imperial"
+  // ── India-specific scoring fields (populated only when country_code === "IN") ──
+  country?: string;            // Mirrors country_code; backend dispatch key.
+  mrp?: string;                // Sticker / MRP shown struck-through, e.g. "₹49,999"
+  bank_offers?: string[];      // Raw text e.g. ["10% off on HDFC cards up to ₹500"]
+  coupon?: string;             // "Apply ₹500 coupon" / "5% off coupon"
+  shipping_cost?: string;      // "FREE" or "₹40"
+  emi_no_cost?: boolean;       // True if a no-cost EMI badge is present
+  cod_available?: boolean;     // True if Cash-on-Delivery is offered
 }
 
 export interface PurchaseBreakdown {

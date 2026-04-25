@@ -220,7 +220,7 @@ export class AmazonExtractor implements SiteExtractor {
       document.querySelector<HTMLImageElement>(".a-dynamic-image")?.src ||
       "";
 
-    return {
+    const base: ProductData = {
       title,
       brand,
       price,
@@ -240,6 +240,85 @@ export class AmazonExtractor implements SiteExtractor {
       source_site: "amazon",
       page_type: "product",
     };
+
+    // Layer India-specific fields on top when on amazon.in. Other regions are
+    // unaffected — the backend only consults these when country === "IN".
+    if (window.location.hostname.includes("amazon.in")) {
+      Object.assign(base, this.extractIndiaFields());
+    }
+    return base;
+  }
+
+  /**
+   * Pull India-only signals (MRP, bank offers, coupon, shipping, EMI, COD) from
+   * an amazon.in product page. All fields are best-effort: missing data just
+   * means the scorer falls back to its default behavior.
+   */
+  private extractIndiaFields(): Partial<ProductData> {
+    // MRP — usually shown as "M.R.P.: ₹X,XXX" struck through above the price.
+    const mrp = extractText([
+      ".a-price.a-text-price[data-a-strike='true'] .a-offscreen",
+      "#corePriceDisplay_desktop_feature_div .a-text-strike",
+      "#priceblock_listprice",
+      ".basisPrice .a-text-strike",
+      "#listPrice",
+    ]);
+
+    // Bank offers — Amazon renders these as a horizontal carousel of small cards.
+    const bankNodes = document.querySelectorAll(
+      "#itembox-InstantBankDiscount .a-box, #vsxoffers_feature_div .a-carousel-card, #applicablePromotionList_feature_div .a-list-item"
+    );
+    const bank_offers: string[] = [];
+    bankNodes.forEach((n) => {
+      const txt = n.textContent?.replace(/\s+/g, " ").trim() || "";
+      // Filter to entries that actually look like bank/card offers.
+      if (txt && /bank|card|emi|credit|debit/i.test(txt) && bank_offers.length < 6) {
+        bank_offers.push(txt.slice(0, 240));
+      }
+    });
+
+    // Coupon — small green "Apply ₹X coupon" badge under the price.
+    const coupon = extractText([
+      "#promoPriceBlockMessage_feature_div .a-color-success",
+      "#applicablePromotionList_feature_div .a-color-success",
+      "#vpcSubstitutionTitle_feature_div .a-color-success",
+    ]);
+
+    // Shipping cost — Amazon shows "FREE delivery" or a numeric charge.
+    const deliveryText = extractText([
+      "#mir-layout-DELIVERY_BLOCK",
+      "#deliveryBlockMessage",
+      "#delivery-message",
+      "#contextualIngressPtLabel_deliveryShortLine",
+    ]);
+    let shipping_cost = "";
+    if (deliveryText) {
+      if (/free/i.test(deliveryText)) {
+        shipping_cost = "FREE";
+      } else {
+        const m = deliveryText.match(/₹\s?([\d,]+)/);
+        if (m) shipping_cost = `₹${m[1]}`;
+      }
+    }
+
+    // No-cost EMI badge.
+    const emiText = extractText([
+      "#emi_feature_div",
+      "#vsxoffers_feature_div",
+    ]);
+    const emi_no_cost = /no\s*cost\s*emi/i.test(emiText);
+
+    // Cash on Delivery — Amazon mentions it in the "Payment" or returns block.
+    const codText = extractText([
+      "#paymentInformation_feature_div",
+      "#mir-layout-PAYMENT",
+      "#paymentSection",
+    ]);
+    const cod_available = /cash\s*on\s*delivery|pay\s*on\s*delivery/i.test(
+      codText + " " + deliveryText
+    );
+
+    return { mrp, bank_offers, coupon, shipping_cost, emi_no_cost, cod_available };
   }
 
   extractCartProducts(): ProductData[] {

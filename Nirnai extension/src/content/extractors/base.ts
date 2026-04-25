@@ -119,6 +119,9 @@ export function applyGeoContext(product: ProductData, geo?: GeoContext): Product
   product.tax_included = g.tax_included;
   product.shipping_region = g.shipping_region;
   product.measurement_system = g.measurement_system;
+  // Mirror country_code into the backend's `country` field so the India
+  // scoring path is selected for IN-region payloads.
+  product.country = g.country_code;
   // Also normalize the legacy currency field to ISO code
   if (!product.currency || product.currency === "USD") {
     product.currency = g.currency_code;
