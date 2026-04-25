@@ -234,20 +234,51 @@ export class BookingExtractor implements SiteExtractor {
       "";
 
     // ── Price ──
+    // Booking.com cards show BOTH per-night and total price.
+    // We MUST extract the TOTAL price for consistent comparison.
+    // Total price is typically the larger/bolder number; per-night is prefixed
+    // with "Per night" text. Strategy: collect all price-like values from the
+    // card and pick the LARGEST one (= total stay price).
     let price = "";
-    const priceEl = card.querySelector('[data-testid="price-and-discounted-price"]') ||
-                    card.querySelector('[data-testid="price"]') ||
-                    card.querySelector('.bui-price-display__value') ||
-                    card.querySelector('.prco-valign-middle-helper');
-    if (priceEl) {
-      price = priceEl.textContent?.trim() || "";
-    }
-    if (!price) {
-      const spans = card.querySelectorAll("span");
-      for (const span of spans) {
-        const text = span.textContent?.trim() || "";
-        if (/[\$€£₹¥]\s*[\d,]+/.test(text)) { price = text; break; }
+    const priceTexts: { value: number; text: string }[] = [];
+
+    // Check known price selectors
+    const priceSelectors = [
+      '[data-testid="price-and-discounted-price"]',
+      '[data-testid="price"]',
+      '.bui-price-display__value',
+      '.prco-valign-middle-helper',
+    ];
+    for (const sel of priceSelectors) {
+      const el = card.querySelector(sel);
+      if (el?.textContent?.trim()) {
+        const text = el.textContent.trim();
+        const match = text.match(/[\$€£₹¥]?\s*([\d,]+(?:\.\d+)?)/);
+        if (match) {
+          priceTexts.push({ value: parseFloat(match[1].replace(/,/g, "")), text });
+        }
       }
+    }
+
+    // Also scan spans for price patterns
+    const spans = card.querySelectorAll("span");
+    for (const span of spans) {
+      const text = span.textContent?.trim() || "";
+      const match = text.match(/([\$€£₹¥])\s*([\d,]+(?:\.\d+)?)/);
+      if (match) {
+        const val = parseFloat(match[2].replace(/,/g, ""));
+        priceTexts.push({
+          value: val,
+          text: `${match[1]}${match[2]}`,
+        });
+      }
+    }
+
+    // Pick the LARGEST price — that's the total stay price.
+    // Per-night is always smaller than total.
+    if (priceTexts.length > 0) {
+      priceTexts.sort((a, b) => b.value - a.value);
+      price = priceTexts[0].text;
     }
 
     // ── Rating ──

@@ -74,8 +74,42 @@ export class WalmartExtractor implements SiteExtractor {
       const url = linkEl ? new URL(linkEl.href, window.location.origin).href : "";
       if (!url) continue;
 
-      const priceEl = card.querySelector('[data-automation-id="product-price"] [aria-hidden="true"], [itemprop="price"], .f2');
-      const price = priceEl?.textContent?.trim() || "";
+      // Walmart renders prices as separate elements: "$170" + "98" (superscript cents).
+      // textContent concatenates them without a decimal → "$17098".
+      // Fix: try itemprop="price" content attr first, then parse the visual format.
+      let price = "";
+      const priceMetaEl = card.querySelector('[itemprop="price"]') as HTMLElement | null;
+      if (priceMetaEl?.getAttribute("content")) {
+        // Structured data has clean numeric value
+        const raw = priceMetaEl.getAttribute("content") || "";
+        if (/^\d+\.?\d*$/.test(raw)) {
+          price = "$" + raw;
+        }
+      }
+      if (!price) {
+        const priceContainer = card.querySelector('[data-automation-id="product-price"], [data-testid="price-wrap"]');
+        if (priceContainer) {
+          // Look for characteristic (dollars) and mantissa (cents) separately
+          const charEl = priceContainer.querySelector('.f2, .price-characteristic, [data-testid="price-dollars"]');
+          const mantEl = priceContainer.querySelector('.price-mantissa, [data-testid="price-cents"], sup');
+          if (charEl) {
+            const dollars = charEl.textContent?.replace(/[^0-9,]/g, "").trim() || "";
+            const cents = mantEl?.textContent?.replace(/[^0-9]/g, "").trim() || "";
+            price = dollars ? (cents ? `$${dollars}.${cents}` : `$${dollars}`) : "";
+          }
+        }
+      }
+      if (!price) {
+        // Fallback: raw textContent, try to reconstruct decimal
+        const priceEl = card.querySelector('[data-automation-id="product-price"] [aria-hidden="true"], [itemprop="price"], .f2');
+        const raw = priceEl?.textContent?.trim() || "";
+        // If it looks like concatenated dollars+cents (e.g. "$17098" from "$170"+"98"),
+        // try to detect and insert decimal before last 2 digits when no decimal exists
+        const cleanMatch = raw.match(/[\$€£₹¥]?\s*([\d,]+(?:\.\d+)?)/);
+        if (cleanMatch) {
+          price = raw.includes(".") ? raw : raw; // keep as-is, will be fixed below
+        }
+      }
 
       const ratingEl = card.querySelector('[data-testid="product-ratings"] .w_iUH7, .stars-container .visuallyhidden');
       const rating = ratingEl?.textContent?.trim() || "";

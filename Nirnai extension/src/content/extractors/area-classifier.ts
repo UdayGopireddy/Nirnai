@@ -31,7 +31,7 @@ export interface SearchProfile {
 
 // ── Determine Domain from Source Site ──
 
-const TRAVEL_SITES = ["airbnb", "booking.com", "expedia.com", "vrbo", "hotels.com", "agoda", "tripadvisor", "googletravel"];
+const TRAVEL_SITES = ["airbnb", "booking.com", "expedia.com", "vrbo", "hotels.com", "agoda", "tripadvisor", "googletravel", "makemytrip", "goibibo", "ixigo", "cleartrip", "yatra", "easemytrip"];
 const SHOPPING_SITES = ["amazon", "walmart", "target", "bestbuy", "costco", "ebay", "homedepot", "lowes", "wayfair", "macys", "nordstrom", "cvs", "walgreens", "nike", "apple", "samsung", "dyson"];
 
 export function detectDomain(siteName: string): DomainType {
