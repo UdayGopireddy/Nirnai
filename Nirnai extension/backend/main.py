@@ -553,6 +553,208 @@ def _repair_json(raw: str) -> str:
     return fixed
 
 
+# ── Dual-track UI enrichment helpers ──────────────────────────────────────
+# These power the "🏆 Best Pick / 💰 Best Deal" tabs by precomputing every
+# label, badge, and percent the frontend needs. Doing this on the backend
+# means the Rust gateway, the popup, and any future client all show the
+# same copy without re-implementing the rules.
+
+# Sellers we treat as first-party / strong marketplace anchors. Match is
+# case-insensitive substring against the cleaned seller string.
+_TRUSTED_SELLER_TOKENS = (
+    "amazon", "appario retail", "cloudtail",
+    "flipkart", "supercomnet", "omnitechretail", "rk world",
+)
+
+# Pack-size tokens like "50ml", "1 kg", "250 g", "30 capsules".
+_PACK_RE = __import__("re").compile(
+    r"(\d+(?:\.\d+)?)\s*(ml|l|g|kg|oz|gm|gms|pcs?|tabs?|tablets?|capsules?|caps?|count|ct)\b"
+)
+_TOKEN_RE = __import__("re").compile(r"[a-z0-9]+")
+
+
+def _normalise_pack(value: str, unit: str) -> tuple[float, str]:
+    """Convert (value, unit) pairs to a comparable canonical form.
+
+    1 kg → (1000, "g"); 1 l → (1000, "ml"); leaves count units as-is.
+    Returns (float_value, canonical_unit). Used so "1 kg" matches "1000 g".
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0, unit
+    u = unit.lower()
+    if u == "kg":
+        return v * 1000.0, "g"
+    if u == "l":
+        return v * 1000.0, "ml"
+    if u in ("gm", "gms"):
+        return v, "g"
+    if u in ("tablets", "tabs", "tab"):
+        return v, "tablet"
+    if u in ("capsules", "caps", "cap"):
+        return v, "capsule"
+    if u in ("pcs", "pc", "ct", "count"):
+        return v, "count"
+    return v, u
+
+
+def _packs_in(text: str) -> set[tuple[float, str]]:
+    return {_normalise_pack(v, u) for v, u in _PACK_RE.findall((text or "").lower())}
+
+
+def _sku_match(origin_title: str, origin_brand: str, alt_title: str, alt_brand: str) -> str:
+    """Return SKU identity confidence between origin and alternative.
+
+    Buckets:
+      "high"   — brand match + same pack size + ≥50% title-token overlap
+      "medium" — brand match + ≥40% title-token overlap
+      "low"    — neither of the above (still likely same category)
+      ""       — missing data on either side; UI hides the chip
+    """
+    if not origin_title or not alt_title:
+        return ""
+
+    o_tokens = set(_TOKEN_RE.findall(origin_title.lower()))
+    a_tokens = set(_TOKEN_RE.findall(alt_title.lower()))
+    if not o_tokens or not a_tokens:
+        return "low"
+
+    overlap = len(o_tokens & a_tokens) / float(len(o_tokens))
+
+    o_brand = (origin_brand or "").strip().lower()
+    a_brand = (alt_brand or "").strip().lower()
+    brand_match = bool(o_brand and (o_brand in a_brand or o_brand in alt_title.lower()))
+
+    o_packs = _packs_in(origin_title)
+    a_packs = _packs_in(alt_title)
+    pack_match = bool(o_packs and a_packs and (o_packs & a_packs))
+
+    if brand_match and pack_match and overlap >= 0.5:
+        return "high"
+    if brand_match and overlap >= 0.4:
+        return "medium"
+    if overlap >= 0.6:  # very strong title overlap can carry on its own
+        return "medium"
+    return "low"
+
+
+def _seller_label_trust(seller: str, fulfiller: str) -> tuple[str, str]:
+    """Derive (display label, trust bucket) from extractor seller/fulfiller.
+
+    Trust buckets: "trusted" | "known" | "unverified".
+    """
+    s = (seller or "").strip()
+    f = (fulfiller or "").strip()
+
+    if not s and not f:
+        return "", "unverified"
+
+    label = s or (f"Fulfilled by {f}" if f else "")
+    sl = s.lower()
+    fl = f.lower()
+
+    if any(t in sl for t in _TRUSTED_SELLER_TOKENS) or any(t in fl for t in _TRUSTED_SELLER_TOKENS):
+        return label, "trusted"
+
+    # A real storefront name (more than a single token) → "known". A bare
+    # 1-2 char string or empty → "unverified".
+    if s and len(s) >= 4:
+        return label, "known"
+    if f:
+        return label, "known"
+    return label, "unverified"
+
+
+def _parse_price_number(raw: str) -> float:
+    """Best-effort numeric parse of a price string. Tries INR first, then USD/EUR.
+
+    Returns 0.0 when nothing parseable is found.
+    """
+    if not raw:
+        return 0.0
+    try:
+        from india_pricing import parse_inr  # type: ignore
+        v = parse_inr(raw)
+        if v and v > 0:
+            return float(v)
+    except Exception:
+        pass
+    try:
+        from hospitality_scorer import _parse_price as _pp  # type: ignore
+        v = _pp(raw)
+        if v and v > 0:
+            return float(v)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _enrich_dual_track(batch, req, origin_score: int, origin_trust: int,
+                        origin_price: str, origin_product) -> None:
+    """Populate price_delta_pct, sku_match, seller_*, and tab headlines.
+
+    Mutates `batch` in place. Safe to call even when origin info is missing
+    or the batch is non-Indian — fields that can't be computed stay empty
+    so the frontend can fall back gracefully.
+    """
+    # Build url → ProductData lookup so we can recover seller info that
+    # the AI ranker dropped on the floor.
+    src_by_url = {(p.url or "").strip(): p for p in (req.listings or []) if p.url}
+
+    origin_title = (origin_product.title if origin_product else "") or ""
+    origin_brand = (origin_product.brand if origin_product else "") or ""
+    origin_price_value = _parse_price_number(origin_price)
+
+    def _enrich_list(items):
+        for item in items:
+            item.price_value = _parse_price_number(item.price or "")
+            if origin_price_value > 0 and item.price_value > 0:
+                delta = (item.price_value - origin_price_value) / origin_price_value
+                item.price_delta_pct = int(round(delta * 100))
+            else:
+                item.price_delta_pct = 0
+
+            src = src_by_url.get((item.url or "").strip())
+            alt_brand = (src.brand if src else "") or ""
+            item.sku_match = _sku_match(
+                origin_title, origin_brand, item.title or "", alt_brand,
+            ) if origin_title else ""
+
+            seller = (src.seller if src else "") or ""
+            fulfiller = (src.fulfiller if src else "") or ""
+            label, trust = _seller_label_trust(seller, fulfiller)
+            item.seller_label = label
+            item.seller_trust = trust
+
+    _enrich_list(batch.ranked or [])
+    _enrich_list(batch.ranked_by_price or [])
+
+    # ── Tab headlines ──
+    if batch.origin_is_best:
+        batch.best_pick_headline = "Your pick is the best we found"
+    elif batch.ranked:
+        batch.best_pick_headline = "Better than your current pick"
+    else:
+        batch.best_pick_headline = ""
+
+    if batch.ranked_by_price:
+        cheapest = batch.ranked_by_price[0]
+        if origin_price_value > 0 and cheapest.price_value > 0 and \
+                cheapest.price_value < origin_price_value:
+            saving_pct = int(round(
+                (origin_price_value - cheapest.price_value) / origin_price_value * 100
+            ))
+            batch.best_deal_headline = (
+                f"Same product, up to {saving_pct}% cheaper"
+                if saving_pct >= 5 else "Same product, cheaper options below"
+            )
+        else:
+            batch.best_deal_headline = "Cheapest options for this product"
+    else:
+        batch.best_deal_headline = ""
+
+
 @app.post("/compare/rank", response_model=BatchResponse)
 async def compare_rank(req: BatchRankRequest) -> BatchResponse:
     """Batch ranking via OpenAI — called by Rust gateway's compare flow."""
@@ -1084,6 +1286,21 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
             _fix_summary_price,
             batch.comparison_summary,
         )
+
+    # ── Dual-track UI enrichment ──
+    # Compute price deltas, SKU-match confidence, seller badges and the
+    # tab headlines once on the backend so every client (Rust gateway,
+    # popup, future mobile) renders identical copy. Safe for non-India
+    # batches: with empty `ranked_by_price`, the Best Deal headline stays
+    # blank and the frontend hides the toggle.
+    _enrich_dual_track(
+        batch,
+        req,
+        origin_score,
+        origin_trust,
+        origin_price,
+        req.origin_product,
+    )
 
     return batch
 

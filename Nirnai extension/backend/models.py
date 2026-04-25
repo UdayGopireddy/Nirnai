@@ -180,6 +180,28 @@ class RankedListing(BaseModel):
     warnings: list[str] = []
     domain: str = "general"  # "hospitality" | "general" etc.
 
+    # ── Dual-track UI enrichment (filled post-ranking by main.py) ──
+    # Parsed numeric price (best-effort, in the listing's local currency).
+    # 0.0 means "could not parse" — UI must hide price-relative chrome.
+    price_value: float = 0.0
+    # Percent change vs origin price. Negative = cheaper, positive = pricier.
+    # 0 when there is no origin baseline or both prices are unparseable.
+    price_delta_pct: int = 0
+    # SKU identity confidence vs the user's origin product:
+    #   "high"   — same brand + same pack size + strong title overlap
+    #   "medium" — same brand + decent title overlap
+    #   "low"    — only category/brand match (treat as "similar product")
+    #   ""       — no origin to compare against
+    sku_match: str = ""
+    # Display string for the seller, e.g. "Amazon", "Cloudtail India",
+    # "Sold by NIVEA Store". Empty when the source listing carried no seller.
+    seller_label: str = ""
+    # Coarse trust bucket for the seller, used for the badge color in the UI:
+    #   "trusted"    — first-party (Amazon/Flipkart Retail) or known marketplace anchor
+    #   "known"      — recognisable third-party with a real storefront name
+    #   "unverified" — no seller info OR generic reseller string
+    seller_trust: str = ""
+
     @field_validator("tradeoffs", "positives", "warnings", mode="before")
     @classmethod
     def coerce_to_list(cls, v):
@@ -205,6 +227,11 @@ class BatchResponse(BaseModel):
     # True when the user's original product beats every alternative we found.
     # Frontend should recommend "stick with your pick" instead of a worse #1.
     origin_is_best: bool = False
+    # Headline shown above each tab in the dual-track UI. Computed by the
+    # backend so the Rust gateway and any future client render the same copy.
+    # Empty string => UI falls back to a default tab title.
+    best_pick_headline: str = ""
+    best_deal_headline: str = ""
 
 
 class BatchRankRequest(BaseModel):

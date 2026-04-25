@@ -714,6 +714,8 @@ fn synthesize_session_from_inventory(
         origin_url: String::new(),
         origin_price: String::new(),
         origin_is_best: false,
+        best_pick_headline: String::new(),
+        best_deal_headline: String::new(),
     };
 
     CompareSession {
@@ -768,6 +770,11 @@ fn inventory_listing_to_ranked(l: &InventoryListing) -> RankedListing {
         positives: l.positives.clone(),
         warnings: l.warnings.clone(),
         domain: "general".to_string(),
+        price_value: 0.0,
+        price_delta_pct: 0,
+        sku_match: String::new(),
+        seller_label: String::new(),
+        seller_trust: String::new(),
     }
 }
 
@@ -1167,6 +1174,26 @@ fn build_compare_html(session_id: &str) -> String {
     .runner-score-dot {{ width: 7px; height: 7px; border-radius: 50%; }}
     .runner-score-label {{ font-size: 10px; color: var(--text-muted); }}
     .runner-score-val {{ font-size: 10px; font-weight: 800; }}
+
+    /* ── Dual-track chips & headline (Best Pick / Best Deal tabs) ── */
+    .dual-headline {{
+      font-size: 13px; font-weight: 700; color: var(--text-muted);
+      margin: -8px 0 14px 4px; letter-spacing: 0.2px;
+    }}
+    .dual-chip {{
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 6px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.2px;
+      border: 1px solid transparent;
+    }}
+    .chip-cheaper        {{ background: rgba(34,197,94,0.14);  color: #22c55e; border-color: rgba(34,197,94,0.32); }}
+    .chip-pricier        {{ background: rgba(148,163,184,0.14); color: #94a3b8; border-color: rgba(148,163,184,0.30); }}
+    .chip-seller-trusted {{ background: rgba(59,130,246,0.14); color: #60a5fa; border-color: rgba(59,130,246,0.32); }}
+    .chip-seller-known   {{ background: rgba(168,162,158,0.14); color: #d6d3d1; border-color: rgba(168,162,158,0.30); }}
+    .chip-seller-unverified {{ background: rgba(234,179,8,0.10); color: #eab308; border-color: rgba(234,179,8,0.28); }}
+    .chip-sku-high   {{ background: rgba(34,197,94,0.10); color: #22c55e; border-color: rgba(34,197,94,0.28); }}
+    .chip-sku-medium {{ background: rgba(234,179,8,0.10); color: #eab308; border-color: rgba(234,179,8,0.28); }}
+    .chip-sku-low    {{ background: rgba(148,163,184,0.10); color: #94a3b8; border-color: rgba(148,163,184,0.26); }}
 
     /* ── Platform Badges ── */
     .platform-badge {{
@@ -1611,6 +1638,45 @@ fn build_compare_html(session_id: &str) -> String {
       return `<span class="platform-badge platform-default">Web</span>`;
     }}
 
+    // ═══ Dual-track chips: price delta vs origin, seller trust, SKU match ═══
+    // These render in the meta row of every card (hero + runners) so the user
+    // can read the deal/quality/identity story in a single glance. All inputs
+    // come from backend-enriched fields on RankedListing — when the field is
+    // empty/zero the chip simply isn't emitted.
+    function priceDeltaChip(pct) {{
+      if (!pct || pct === 0) return "";
+      if (pct < 0) {{
+        // Cheaper — green. Show absolute %.
+        return `<span class="dual-chip chip-cheaper">${{Math.abs(pct)}}% cheaper</span>`;
+      }}
+      // Pricier — neutral grey, never a warning (it's a data point, not a flag).
+      return `<span class="dual-chip chip-pricier">${{pct}}% pricier</span>`;
+    }}
+    function sellerTrustChip(label, trust) {{
+      if (!label && !trust) return "";
+      const text = label || (trust === "trusted" ? "Trusted seller" : "Seller info");
+      const cls = trust === "trusted" ? "chip-seller-trusted"
+                : trust === "known"   ? "chip-seller-known"
+                : "chip-seller-unverified";
+      const icon = trust === "trusted" ? "🛡️"
+                 : trust === "known"   ? "🏬"
+                 : "❓";
+      return `<span class="dual-chip ${{cls}}" title="${{text}}">${{icon}} ${{text}}</span>`;
+    }}
+    function skuMatchChip(level) {{
+      if (!level) return "";
+      if (level === "high")   return `<span class="dual-chip chip-sku-high"   title="Same brand, same pack size, very close title — likely the same SKU">Same product</span>`;
+      if (level === "medium") return `<span class="dual-chip chip-sku-medium" title="Same brand, similar product — close match but not guaranteed identical">Close match</span>`;
+      return `<span class="dual-chip chip-sku-low" title="Same category, but a different product. Treat as a similar option, not the same SKU.">Similar product</span>`;
+    }}
+    function dualChips(listing) {{
+      let out = "";
+      out += priceDeltaChip(listing.price_delta_pct);
+      out += sellerTrustChip(listing.seller_label, listing.seller_trust);
+      out += skuMatchChip(listing.sku_match);
+      return out;
+    }}
+
     function miniScoreBar(label, score) {{
       const color = scoreColor(score);
       return `<div class="score-bar-mini">
@@ -1704,6 +1770,10 @@ fn build_compare_html(session_id: &str) -> String {
           <button onclick="selectRankTab('quality')" style="border:none;cursor:pointer;font:inherit;font-weight:600;padding:8px 16px;border-radius:10px;${{qActive}}">🏆 Best Pick</button>
           <button onclick="selectRankTab('price')"   style="border:none;cursor:pointer;font:inherit;font-weight:600;padding:8px 16px;border-radius:10px;${{pActive}}">💰 Best Deal</button>
         </div>`;
+
+        // Tab headline (computed by backend so copy stays consistent across clients).
+        const _hl = _mode === "price" ? batch.best_deal_headline : batch.best_pick_headline;
+        if (_hl) html += `<div class="dual-headline">${{_hl}}</div>`;
       }}
 
       // ═══ ORIGIN IS BEST — user's product beats all alternatives ═══
@@ -1756,6 +1826,7 @@ fn build_compare_html(session_id: &str) -> String {
             html += stampBadge(listing.stamp?.stamp, listing.stamp?.label, listing.purchase_score, listing.review_trust?.trust_score, listing.url, listing.rank);
             html += platformBadge(listing.url);
             if (listing.price) html += `<span class="runner-price">${{normalizePrice(listing.price)}}</span>`;
+            html += dualChips(listing);
             html += `</div>`;
             if (listing.why_ranked) html += `<div class="runner-reason">${{listing.why_ranked}}</div>`;
             html += `</div>`;
@@ -1814,6 +1885,7 @@ fn build_compare_html(session_id: &str) -> String {
       html += `<div class="hero-meta">`;
       if (top.price) html += `<span class="meta-chip chip-price">${{normalizePrice(top.price)}}</span>`;
       html += `<span class="meta-chip ${{conf.cls}}">${{conf.text}}</span>`;
+      html += dualChips(top);
       html += `</div></div></div>`; // meta, content, top
 
       // Confidence indicator — only show when #1 actually earns it
@@ -1900,6 +1972,7 @@ fn build_compare_html(session_id: &str) -> String {
           html += stampBadge(listing.stamp?.stamp, listing.stamp?.label, listing.purchase_score, listing.review_trust?.trust_score, listing.url, listing.rank);
           html += platformBadge(listing.url);
           if (listing.price) html += `<span class="runner-price">${{normalizePrice(listing.price)}}</span>`;
+          html += dualChips(listing);
           html += `</div>`;
           if (listing.why_ranked) html += `<div class="runner-reason">${{listing.why_ranked}}</div>`;
           html += `</div>`; // runner-info

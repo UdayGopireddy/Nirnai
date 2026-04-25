@@ -198,6 +198,18 @@ pub struct RankedListing {
     pub warnings: Vec<String>,
     #[serde(default = "default_domain")]
     pub domain: String,
+    /// Dual-track UI enrichment fields (Python backend fills these post-rank;
+    /// safe defaults so older payloads still deserialize).
+    #[serde(default)]
+    pub price_value: f64,
+    #[serde(default)]
+    pub price_delta_pct: i32,
+    #[serde(default)]
+    pub sku_match: String,
+    #[serde(default)]
+    pub seller_label: String,
+    #[serde(default)]
+    pub seller_trust: String,
 }
 
 fn default_domain() -> String {
@@ -226,6 +238,11 @@ pub struct BatchResponse {
     /// non-India batches. Drives the "Best Deal" tab in the compare UI.
     #[serde(default)]
     pub ranked_by_price: Vec<RankedListing>,
+    /// Tab headlines computed by the backend so every client renders identical copy.
+    #[serde(default)]
+    pub best_pick_headline: String,
+    #[serde(default)]
+    pub best_deal_headline: String,
 }
 
 // ── Agent-backed API client ──

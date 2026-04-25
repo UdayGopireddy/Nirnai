@@ -468,6 +468,11 @@ impl Inventory {
             positives: analysis.positives.clone(),
             warnings: analysis.warnings.clone(),
             domain: "general".to_string(),
+            price_value: 0.0,
+            price_delta_pct: 0,
+            sku_match: String::new(),
+            seller_label: String::new(),
+            seller_trust: String::new(),
         };
 
         let geo = GeoContext {
