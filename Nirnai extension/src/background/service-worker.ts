@@ -1134,8 +1134,20 @@ chrome.runtime.onMessage.addListener(
       const isTravelSite = siteCategory === "travel" || TRAVEL_SITES.includes(originSite);
       let sitePool = isTravelSite ? TRAVEL_SITES : SHOPPING_SITES;
 
+      // ═══ INDIA-ONLY GUARD ═══
+      // When the user is shopping on an India host (.in TLD or flipkart/nykaa/
+      // myntra/ajio/meesho/tatacliq), restrict the cross-site pool to Indian
+      // marketplaces with INR pricing. A US listing in USD is not actionable
+      // for an Indian shopper — they can't add to cart, can't ship, can't pay.
+      const isIndia = !!msg.isIndia;
+      const INDIA_SHOPPING_SITES = ["amazon", "flipkart", "myntra", "nykaa", "meesho", "ajio"];
+      if (!isTravelSite && isIndia) {
+        sitePool = INDIA_SHOPPING_SITES;
+        console.log(`NirnAI: India host detected, restricting cross-site pool to: [${sitePool.join(", ")}]`);
+      }
+
       // For shopping, filter sites to relevant categories based on product domain
-      if (!isTravelSite && productDomain) {
+      if (!isTravelSite && !isIndia && productDomain) {
         const DOMAIN_SITES: Record<string, string[]> = {
           fashion:     ["amazon", "walmart", "target", "ebay", "macys", "nordstrom", "nike"],
           electronics: ["amazon", "walmart", "target", "bestbuy", "costco", "ebay"],
@@ -1175,7 +1187,13 @@ chrome.runtime.onMessage.addListener(
       // Build URLs for ALL sites
       const siteUrls: { site: string; url: string }[] = [];
       for (const site of otherSites) {
-        const url = buildCrossSiteUrl(site, searchParams);
+        let url = buildCrossSiteUrl(site, searchParams);
+        // India guard: rewrite amazon.com → amazon.in so the user lands on
+        // INR listings they can actually buy. Other India-only sites
+        // (flipkart/nykaa/...) already point at the correct host.
+        if (isIndia && site === "amazon" && url.includes("amazon.com")) {
+          url = url.replace("https://www.amazon.com", "https://www.amazon.in");
+        }
         if (url) siteUrls.push({ site, url });
       }
 

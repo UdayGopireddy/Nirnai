@@ -983,6 +983,11 @@ function onRankAlternativesClick(e: Event): void {
       // Backend / Rust gateway use this only as a UI hint (compare URL gets
       // a #tab=price hash); ranking computation is unaffected.
       rankMode: (btn.dataset.mode === "price") ? "price" : "quality",
+      // When the origin is an India host, restrict the cross-site pool to
+      // India-only marketplaces (amazon.in, flipkart, nykaa, myntra, ajio,
+      // tatacliq, meesho). Otherwise the user gets US listings in USD that
+      // they can't actually buy from India.
+      isIndia: isIndiaHost(),
     } as any);
 }
 
