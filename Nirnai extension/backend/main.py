@@ -146,9 +146,11 @@ async def _analyze_india(product: ProductData) -> AnalysisResponse:
         purchase_score=india.purchase_score,
         health_score=health_score,
         is_food=food,
-        product=product,
+        purchase_breakdown=india.breakdown,
+        health_breakdown=health_breakdown,
         review_trust=review_trust,
         risk_flags=risk_flags,
+        product=product,
     )
 
     # Prepend India-specific reasons (effective price, MRP, COD/EMI) above the
@@ -208,6 +210,7 @@ async def analyze_product(product: ProductData) -> AnalysisResponse:
         return await _analyze_india(product)
 
     # Calculate scores (purchase scoring now returns ReviewTrust too)
+    purchase_score, purchase_breakdown, review_trust = calculate_purchase_score(product)
     health_score, health_breakdown = calculate_health_score(product)
 
     food = is_food_product(product)
