@@ -177,134 +177,33 @@ def generate_stamp(
     risk_flags: list[str] | None = None,
     product: ProductData | None = None,
 ) -> tuple[DecisionStamp, str, list[str], list[str], list[str]]:
+    """Route to the correct domain-specific stamp generator.
+
+    Hospitality and retail have fully independent:
+      - Thresholds (hospitality: 70/40, retail: 75/45)
+      - Labels (BOOK vs BUY)
+      - Reason builders
+      - Risk flag generators
     """
-    Generate the decision stamp per decision_stamp_badge_system spec.
-
-    Phase 1 upgrade: risk_flags are surfaced directly in warnings.
-    Domain-aware: uses travel-specific language for travel listings.
-
-    Returns: (stamp, legacy_decision, reasons, warnings, positives)
-    """
-    # Gather reasons
-    purchase_positives, purchase_warnings = _build_purchase_reasons(
-        purchase_breakdown, review_trust, product
-    )
-
-    # Add risk flags to warnings (these bypass normal threshold logic)
-    if risk_flags:
-        purchase_warnings = list(risk_flags) + purchase_warnings
-
-    health_positives = []
-    health_warnings = []
-    health_signal = ""
-
-    if is_food and health_score > 0:
-        health_positives, health_warnings, health_signal = _build_health_reasons(
-            health_score, health_breakdown
+    domain = ScoringDomain.GENERAL
+    if product:
+        domain = classify_domain(
+            getattr(product, 'source_site', ''),
+            getattr(product, 'category', ''),
+            getattr(product, 'title', ''),
         )
 
-    # Also check personal care health scoring
-    from health_scoring import is_personal_care_product
-    is_personal_care = is_personal_care_product(product) if product else False
-    if is_personal_care and health_score > 0:
-        health_positives, health_warnings, health_signal = _build_health_reasons(
-            health_score, health_breakdown
+    if domain == ScoringDomain.HOSPITALITY:
+        from hospitality_scorer import generate_stamp as _gen_hospitality
+        return _gen_hospitality(
+            purchase_score, health_score, is_food,
+            purchase_breakdown, health_breakdown, review_trust,
+            risk_flags, product,
         )
-        if health_score >= 80:
-            health_positives.append("Premium ingredient quality")
-            health_signal = "Premium ingredients justify the price"
-
-    all_positives = purchase_positives + health_positives
-    all_warnings = purchase_warnings + health_warnings
-
-    # --- Decision logic (from technical blueprint Section 14) ---
-    if is_food and health_score > 0:
-        if health_score < 40:
-            stamp_type = "AVOID"
-            legacy = "DON'T BUY"
-        elif purchase_score > 80 and health_score > 70:
-            stamp_type = "SMART_BUY"
-            legacy = "BUY"
-        elif purchase_score < 50:
-            stamp_type = "AVOID"
-            legacy = "DON'T BUY"
-        elif purchase_score >= 65 and health_score >= 55:
-            stamp_type = "SMART_BUY"
-            legacy = "BUY"
-        else:
-            stamp_type = "CHECK"
-            legacy = "NEUTRAL"
-    elif is_personal_care and health_score > 0:
-        # Premium quality override: high health_score elevates verdict
-        if health_score >= 80 and purchase_score >= 40:
-            stamp_type = "SMART_BUY"
-            legacy = "BUY"
-        elif health_score >= 60 and purchase_score >= 50:
-            stamp_type = "SMART_BUY"
-            legacy = "BUY"
-        elif purchase_score < 40 or (health_score > 0 and health_score < 30):
-            stamp_type = "AVOID"
-            legacy = "DON'T BUY"
-        elif purchase_score >= 40:
-            stamp_type = "CHECK"
-            legacy = "NEUTRAL"
-        else:
-            stamp_type = "CHECK"
-            legacy = "NEUTRAL"
     else:
-        # Domain-aware thresholds: hospitality has inherently sparser data
-        # (price requires dates, brand doesn't exist, etc.)
-        domain = ScoringDomain.GENERAL
-        if product:
-            domain = classify_domain(
-                getattr(product, 'source_site', ''),
-                getattr(product, 'category', ''),
-                getattr(product, 'title', ''),
-            )
-        buy_threshold = 70 if domain == ScoringDomain.HOSPITALITY else 75
-        avoid_threshold = 40 if domain == ScoringDomain.HOSPITALITY else 45
-
-        if purchase_score >= buy_threshold:
-            stamp_type = "SMART_BUY"
-            legacy = "BUY"
-        elif purchase_score < avoid_threshold:
-            stamp_type = "AVOID"
-            legacy = "DON'T BUY"
-        else:
-            stamp_type = "CHECK"
-            legacy = "NEUTRAL"
-
-    # Build stamp
-    stamp_map = {
-        "SMART_BUY": ("BUY", "🟢"),
-        "CHECK": ("THINK ABOUT IT", "🟡"),
-        "AVOID": ("DON'T BUY", "🔴"),
-    }
-    label, icon = stamp_map[stamp_type]
-
-    # Pick top 2 micro-reasons
-    if stamp_type == "AVOID":
-        micro_reasons = (all_warnings or ["Review carefully"])[:2]
-    elif stamp_type == "SMART_BUY":
-        micro_reasons = (all_positives or ["Looks good"])[:2]
-    else:
-        # CHECK — mix of both
-        micro_reasons = (all_warnings[:1] + all_positives[:1]) or ["Mixed signals"]
-
-    # Build purchase signal
-    purchase_signal_parts = purchase_positives[:2] if stamp_type == "SMART_BUY" else purchase_warnings[:1] + purchase_positives[:1]
-    purchase_signal = " • ".join(purchase_signal_parts) if purchase_signal_parts else "Average value"
-
-    stamp = DecisionStamp(
-        stamp=stamp_type,
-        label=label,
-        icon=icon,
-        reasons=micro_reasons,
-        purchase_signal=purchase_signal,
-        health_signal=health_signal,
-    )
-
-    # Top reasons for the full response
-    reasons = micro_reasons
-
-    return stamp, legacy, reasons, all_warnings, all_positives
+        from retail_scorer import generate_stamp as _gen_retail
+        return _gen_retail(
+            purchase_score, health_score, is_food,
+            purchase_breakdown, health_breakdown, review_trust,
+            risk_flags, product,
+        )

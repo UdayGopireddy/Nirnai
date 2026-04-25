@@ -34,6 +34,8 @@ class ScoringDomain(str, Enum):
 DOMAIN_HOSPITALITY = frozenset({
     "airbnb", "booking", "vrbo", "hotels", "agoda",
     "tripadvisor", "expedia", "googletravel",
+    # India platforms
+    "makemytrip", "goibibo", "ixigo", "cleartrip", "yatra", "easemytrip",
 })
 
 DOMAIN_ELECTRONICS = frozenset({
@@ -108,6 +110,12 @@ def classify_domain(source_site: str, category: str = "", title: str = "") -> Sc
         "snack", "cereal", "chocolate", "protein", "vitamin", "supplement",
         "organic", "granola", "coffee", "tea", "food", "grocery",
         "shampoo", "toothpaste", "deodorant", "body wash", "sunscreen",
+        "skincare", "skin care", "acne", "moisturizer", "serum", "cleanser",
+        "lotion", "patch", "patches", "ointment", "face wash",
+        "hair conditioner", "hair care", "soap", "lip balm", "makeup", "mascara",
+        "foundation", "concealer", "fragrance", "perfume", "cologne",
+        "medicine", "medication", "pain relief", "antibiotic", "bandage",
+        "face cream", "body cream", "eye cream", "night cream",
     ]):
         return ScoringDomain.GROCERY
 
@@ -116,6 +124,8 @@ def classify_domain(source_site: str, category: str = "", title: str = "") -> Sc
         "furniture", "mattress", "pillow", "bedding", "curtain", "rug",
         "lamp", "shelf", "storage", "kitchen", "cookware", "blender",
         "drill", "saw", "paint", "plumbing", "lumber",
+        "air conditioner", "ac unit", "split ac", "window ac", "inverter ac",
+        "hvac", "cooling", "heating",
     ]):
         return ScoringDomain.HOME
 

@@ -36,14 +36,24 @@ FOOD_CATEGORIES = [
 ]
 
 # Categories that are personal care
+# Keywords that must match as whole words (avoid false positives like
+# "conditioner" inside "air conditioner", "cream" inside "ice cream maker", etc.)
+PERSONAL_CARE_WORD_MATCH = {
+    "cream", "lip", "nail", "bath", "soap", "bond",
+    "repair", "restore", "maintenance",
+}
+
 PERSONAL_CARE_CATEGORIES = [
-    "shampoo", "conditioner", "skincare", "skin care", "soap",
+    "shampoo", "skincare", "skin care",
+    "hair conditioner",
     "lotion", "moisturizer", "sunscreen", "toothpaste", "deodorant",
     "cosmetic", "makeup", "hair care", "haircare", "body wash",
-    "face wash", "cleanser", "serum", "cream", "beauty",
-    "personal care", "hair color", "hair dye", "lip", "nail",
-    "bath", "fragrance", "perfume", "cologne",
-    "repair", "restore", "bond", "maintenance",  # common in premium hair care
+    "face wash", "cleanser", "serum", "beauty",
+    "personal care", "hair color", "hair dye",
+    "fragrance", "perfume", "cologne",
+    # word-match only (listed in PERSONAL_CARE_WORD_MATCH):
+    "cream", "lip", "nail", "bath", "soap", "bond",
+    "repair", "restore", "maintenance",
 ]
 
 
@@ -56,11 +66,21 @@ def is_food_product(product: ProductData) -> bool:
         getattr(product, 'category', ''),
         getattr(product, 'title', ''),
     )
-    if domain == ScoringDomain.HOSPITALITY:
+    # Only grocery/general domains can contain food in this pipeline.
+    # Home/electronics items often carry spec text in `ingredients`.
+    if domain in (ScoringDomain.HOSPITALITY, ScoringDomain.ELECTRONICS, ScoringDomain.HOME, ScoringDomain.FASHION):
         return False
 
-    if product.ingredients or product.nutritionInfo:
+    if domain == ScoringDomain.GROCERY:
         return True
+
+    if product.ingredients or product.nutritionInfo:
+        category_lower = product.category.lower()
+        title_lower = product.title.lower()
+        return any(
+            kw in category_lower or kw in title_lower
+            for kw in FOOD_CATEGORIES
+        )
 
     category_lower = product.category.lower()
     title_lower = product.title.lower()
@@ -79,16 +99,22 @@ def is_personal_care_product(product: ProductData) -> bool:
         getattr(product, 'category', ''),
         getattr(product, 'title', ''),
     )
-    if domain == ScoringDomain.HOSPITALITY:
+    if domain in (ScoringDomain.HOSPITALITY, ScoringDomain.ELECTRONICS, ScoringDomain.HOME, ScoringDomain.FASHION):
         return False
 
     category_lower = product.category.lower()
     title_lower = product.title.lower()
+    combined = f"{category_lower} {title_lower}"
 
-    return any(
-        kw in category_lower or kw in title_lower
-        for kw in PERSONAL_CARE_CATEGORIES
-    )
+    for kw in PERSONAL_CARE_CATEGORIES:
+        if kw in PERSONAL_CARE_WORD_MATCH:
+            # Word-boundary matching avoids partial-word false positives.
+            if re.search(r'\b' + re.escape(kw) + r'\b', combined):
+                return True
+        else:
+            if kw in combined:
+                return True
+    return False
 
 
 def score_nutrition(product: ProductData) -> int:

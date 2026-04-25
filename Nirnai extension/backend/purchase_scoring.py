@@ -609,50 +609,30 @@ def score_delivery(product: ProductData) -> int:
     return 55
 
 
-def calculate_purchase_score(product: ProductData) -> tuple[int, PurchaseBreakdown, ReviewTrust]:
+def calculate_purchase_score(
+    product: ProductData,
+    mid_price_override: float | None = None,
+) -> tuple[int, PurchaseBreakdown, ReviewTrust]:
+    """Route to the correct domain-specific scoring pipeline.
+
+    Hospitality and retail are fully independent pipelines with different:
+      - Weights (hospitality: reviews 25%, value 25%, etc.)
+      - Thresholds (hospitality: buy≥70, avoid<40; retail: buy≥75, avoid<45)
+      - Component scorers
+      - Confidence modulation
+
+    mid_price_override: in batch/compare context, the median price of all
+    listings. Passed to hospitality scorer so value scoring uses relative
+    pricing (handles total-stay prices, different markets, etc.).
     """
-    Calculate purchase score with confidence modulation.
+    domain = classify_domain(product.source_site, product.category, product.title)
 
-    Phase 1 scoring model:
-      raw_score = weighted sum of 7 components
-      final_score = raw_score * confidence + 50 * (1 - confidence)
-
-    When confidence is low (sparse data, suspicious reviews), the score
-    regresses toward 50 (neutral). This prevents "BUY" verdicts on
-    products we know nothing about.
-
-    Weights: Reviews 25%, Price 25%, Seller 15%,
-             Returns 10%, Popularity 10%, Quality 10%, Delivery 5%
-    """
-    review_trust = compute_review_trust(product)
-
-    breakdown = PurchaseBreakdown(
-        reviews=score_reviews(product, review_trust),
-        price=score_price(product),
-        seller=score_seller(product),
-        returns=score_returns(product),
-        popularity=score_popularity(product),
-        specs=score_quality_signals(product),  # Renamed: now uses brand + quality
-        delivery=score_delivery(product),
-    )
-
-    raw_score = int(
-        breakdown.reviews * 0.25
-        + breakdown.price * 0.25
-        + breakdown.seller * 0.15
-        + breakdown.returns * 0.10
-        + breakdown.popularity * 0.10
-        + breakdown.specs * 0.10
-        + breakdown.delivery * 0.05
-    )
-
-    # ── Confidence modulation ─────────────────────────────────────
-    # Pull score toward neutral (50) when confidence is low.
-    # This prevents high scores on sparse data and low scores on no data.
-    confidence = _compute_data_confidence(product, review_trust)
-    final_score = int(raw_score * confidence + 50 * (1 - confidence))
-
-    return final_score, breakdown, review_trust
+    if domain == ScoringDomain.HOSPITALITY:
+        from hospitality_scorer import calculate_hospitality_score
+        return calculate_hospitality_score(product, mid_price_override=mid_price_override)
+    else:
+        from retail_scorer import calculate_retail_score
+        return calculate_retail_score(product)
 
 
 def _compute_data_confidence(product: ProductData, review_trust: ReviewTrust) -> float:
