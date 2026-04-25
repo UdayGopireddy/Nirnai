@@ -27,6 +27,17 @@ import { AgodaExtractor } from "./extractors/agoda.js";
 import { HotelsExtractor } from "./extractors/hotels.js";
 import { TripadvisorExtractor } from "./extractors/tripadvisor.js";
 import { GoogleTravelExtractor } from "./extractors/googletravel.js";
+import { MakeMyTripExtractor } from "./extractors/makemytrip.js";
+import { IxigoExtractor } from "./extractors/ixigo.js";
+import { GoibiboExtractor } from "./extractors/goibibo.js";
+import { CleartripExtractor } from "./extractors/cleartrip.js";
+import { YatraExtractor } from "./extractors/yatra.js";
+import { EaseMyTripExtractor } from "./extractors/easemytrip.js";
+import { FlipkartExtractor } from "./extractors/flipkart.js";
+import { MyntraExtractor } from "./extractors/myntra.js";
+import { NykaaExtractor } from "./extractors/nykaa.js";
+import { MeeshoExtractor } from "./extractors/meesho.js";
+import { AjioExtractor } from "./extractors/ajio.js";
 import { GenericExtractor } from "./extractors/generic.js";
 import { collectListings, SearchProfile, classifySearch, haversineDistance } from "./extractors/area-classifier.js";
 
@@ -56,6 +67,17 @@ const EXTRACTORS: SiteExtractor[] = [
   new HotelsExtractor(),
   new TripadvisorExtractor(),
   new GoogleTravelExtractor(),
+  new MakeMyTripExtractor(),
+  new IxigoExtractor(),
+  new GoibiboExtractor(),
+  new CleartripExtractor(),
+  new YatraExtractor(),
+  new EaseMyTripExtractor(),
+  new FlipkartExtractor(),
+  new MyntraExtractor(),
+  new NykaaExtractor(),
+  new MeeshoExtractor(),
+  new AjioExtractor(),
   new GenericExtractor(),
 ];
 
@@ -65,6 +87,155 @@ const extractor = detectSiteExtractor(EXTRACTORS);
 
 const PANEL_ID = "nirnai-panel";
 const BADGE_ID = "nirnai-decision-badge";
+
+// ── Amazon Associate (affiliate) — BUY CTA ──────────────────────────────────
+// Replace with your approved Associate tag for each marketplace.
+// Amazon only credits clicks that originate from a *new* navigation we
+// initiate (a clearly labelled CTA), not from rewriting Amazon's own DOM.
+const AMAZON_ASSOC_TAGS: Record<string, string> = {
+  "amazon.com":    "nirnai-20",
+  "amazon.in":     "nirnai-21",
+  "amazon.co.uk":  "nirnai-21",
+  "amazon.ca":     "nirnai-20",
+  "amazon.com.au": "nirnai-22",
+  "amazon.de":     "nirnai-21",
+};
+
+function amazonHostKey(host: string): string | null {
+  const h = host.toLowerCase().replace(/^www\./, "");
+  if (!h.includes("amazon.")) return null;
+  // Match the longest known suffix (handles smile.amazon.com, www., etc.)
+  const known = Object.keys(AMAZON_ASSOC_TAGS).sort((a, b) => b.length - a.length);
+  for (const k of known) if (h.endsWith(k)) return k;
+  return null;
+}
+
+function extractAsin(url: string): string | null {
+  // Standard Amazon ASIN forms: /dp/ASIN, /gp/product/ASIN, /gp/aw/d/ASIN
+  const m = url.match(/\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})(?:[/?]|$)/);
+  return m ? m[1] : null;
+}
+
+function buildAmazonAffiliateUrl(currentUrl: string): string | null {
+  try {
+    const u = new URL(currentUrl);
+    const host = amazonHostKey(u.hostname);
+    if (!host) return null;
+    const tag = AMAZON_ASSOC_TAGS[host];
+    if (!tag) return null;
+    const asin = extractAsin(u.pathname + u.search);
+    if (!asin) return null;
+    // Brand-new clean URL → fresh Amazon session attribution
+    return `https://www.${host}/dp/${asin}?tag=${encodeURIComponent(tag)}`;
+  } catch {
+    return null;
+  }
+}
+
+// ── Pre-checkout price recheck ────────────────────────────────────────────
+// Snapshot the bare-minimum product fields needed for /products/recheck.
+// We don't have the full ProductData here without a re-extract, but title +
+// brand + url + price is enough for the canonical_id resolver and the price
+// drift comparison. Failures fall back to {} (recheck will return "unknown").
+function productSnapshotForRecheck(): Record<string, string> {
+  try {
+    const ext = (window as any).__nirnai_extractor;
+    if (ext && typeof ext.extractProduct === "function") {
+      const p = ext.extractProduct();
+      return {
+        title: p.title || "",
+        brand: p.brand || "",
+        price: p.price || "",
+        currency: p.currency || "",
+        url: p.url || window.location.href,
+        source_site: p.source_site || window.location.hostname,
+        barcode: p.barcode || "",
+      };
+    }
+  } catch { /* ignore */ }
+  return { url: window.location.href, source_site: window.location.hostname };
+}
+
+/** Hook the SMART_BUY affiliate link: short price-drift check before redirect.
+ *  Fail-open in every branch — we never block a sale on our own bug. */
+function attachAffiliateRecheck(productSnapshot: Record<string, string>): void {
+  const link = document.getElementById("nirnai-affiliate-buy") as HTMLAnchorElement | null;
+  if (!link) return;
+
+  let proceeded = false;
+  link.addEventListener("click", (ev) => {
+    if (proceeded) return; // second click after we re-enabled the link
+    ev.preventDefault();
+
+    const href = link.href;
+    const restoreLabel = link.innerHTML;
+    link.innerHTML = "🔍 Checking price…";
+    (link.style as any).pointerEvents = "none";
+
+    // Hard 2.5s timeout — never make the user wait longer than that for a
+    // recheck; if the network is slow, just open the link.
+    const proceed = (warning?: { level: string; message: string }) => {
+      link.innerHTML = restoreLabel;
+      (link.style as any).pointerEvents = "auto";
+      proceeded = true;
+      if (warning && warning.level === "warn") {
+        showRecheckWarning(link, warning.message, href);
+      } else {
+        window.open(href, "_blank", "noopener,nofollow");
+      }
+    };
+
+    const timeoutId = window.setTimeout(() => proceed(), 2500);
+
+    fetch(`${API_BASE_URL}/products/recheck`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        product: productSnapshot,
+        shown_price: productSnapshot.price || "",
+        threshold_pct: 10.0,
+      }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        window.clearTimeout(timeoutId);
+        if (!json) return proceed();
+        proceed({ level: json.warn_level || "unknown", message: json.message || "" });
+      })
+      .catch(() => {
+        window.clearTimeout(timeoutId);
+        proceed();
+      });
+  });
+}
+
+/** Inline drift-warning UI. Shows the message and a confirm button that
+ *  opens the affiliate URL. Auto-removes itself on dismiss. */
+function showRecheckWarning(anchor: HTMLAnchorElement, message: string, href: string): void {
+  const existing = document.getElementById("nirnai-recheck-warning");
+  if (existing) existing.remove();
+  const box = document.createElement("div");
+  box.id = "nirnai-recheck-warning";
+  box.style.cssText =
+    "margin-top:10px;padding:10px 12px;background:rgba(217,119,6,0.12);" +
+    "border:1px solid #d97706;border-radius:8px;font-size:11px;color:#fbbf24;" +
+    "line-height:1.4;text-align:left;";
+  box.innerHTML =
+    `<div style="font-weight:800;margin-bottom:4px;">⚠ Price changed since we scored this</div>` +
+    `<div style="opacity:0.85;">${message}</div>` +
+    `<div style="margin-top:8px;display:flex;gap:6px;">` +
+      `<button id="nirnai-recheck-go" style="flex:1;padding:6px;font-size:11px;font-weight:700;color:#fff;background:#d97706;border:none;border-radius:6px;cursor:pointer;">Continue anyway</button>` +
+      `<button id="nirnai-recheck-cancel" style="flex:1;padding:6px;font-size:11px;font-weight:700;color:#94a3b8;background:transparent;border:1px solid #334155;border-radius:6px;cursor:pointer;">Cancel</button>` +
+    `</div>`;
+  anchor.insertAdjacentElement("afterend", box);
+  document.getElementById("nirnai-recheck-go")?.addEventListener("click", () => {
+    box.remove();
+    window.open(href, "_blank", "noopener,nofollow");
+  });
+  document.getElementById("nirnai-recheck-cancel")?.addEventListener("click", () => {
+    box.remove();
+  });
+}
 
 // ── Affiliate URL rewriting ─────────────────────────────────────────────────
 // Uncomment and replace placeholder IDs once signed up at impact.com
@@ -307,7 +478,7 @@ function injectAiSections(
       <div style="background:#111827;border-radius:12px;padding:12px 14px;border:1px solid #1e293b;">
         <div style="font-size:12px;font-weight:700;color:#818cf8;margin-bottom:4px;">${suggestion.product_name}</div>
         <div style="font-size:10px;line-height:1.45;color:#94a3b8;margin-bottom:10px;">${suggestion.reason}</div>
-        <div id="nirnai-suggestion-rank" data-url="${suggestion.search_url || ""}" data-name="${suggestion.product_name}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
+        <div id="nirnai-suggestion-rank" data-url="${suggestion.search_url || ""}" data-name="${suggestion.product_name}" data-domain="${fullAnalysis?.domain || ""}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
       </div>
     `;
     footer.insertAdjacentElement("beforebegin", suggDiv);
@@ -322,12 +493,23 @@ function showResultPanel(analysis: AnalysisResponse): void {
   removePanel();
 
   const stamp = analysis.stamp;
+  // Backend is single source of truth for labels (BEST PICK / BUY / CONSIDER / CAUTION / SKIP)
+  const displayLabel = stamp.label;
+  // Green for endorsement (BEST PICK, BUY, BOOK), yellow for CONSIDER/CAUTION, red for SKIP
   const stampColors: Record<string, { bg: string; border: string; text: string; glow: string }> = {
     SMART_BUY: { bg: "rgba(5,150,105,0.12)", border: "#059669", text: "#34d399", glow: "rgba(52,211,153,0.08)" },
     CHECK:     { bg: "rgba(217,119,6,0.12)", border: "#d97706", text: "#fbbf24", glow: "rgba(251,191,36,0.08)" },
+    CAUTION:   { bg: "rgba(217,119,6,0.12)", border: "#d97706", text: "#fbbf24", glow: "rgba(251,191,36,0.08)" },
     AVOID:     { bg: "rgba(220,38,38,0.12)", border: "#dc2626", text: "#f87171", glow: "rgba(248,113,113,0.08)" },
   };
-  const sc = stampColors[stamp.stamp] || stampColors.CHECK;
+  const sc = stampColors[stamp.stamp] || stampColors.CAUTION;
+
+  // Affiliate CTA: only when we actively endorse the product AND it's an
+  // Amazon product page where we can extract an ASIN. Opens a brand-new
+  // Amazon tab with our Associate tag (clean session, no DOM rewriting).
+  const affiliateBuyUrl = stamp.stamp === "SMART_BUY"
+    ? buildAmazonAffiliateUrl(window.location.href)
+    : null;
 
   const panel = document.createElement("div");
   panel.id = PANEL_ID;
@@ -374,8 +556,17 @@ function showResultPanel(analysis: AnalysisResponse): void {
     </div>
     <div style="background:${sc.bg};border-bottom:1px solid ${sc.border};padding:16px 18px;text-align:center;">
       <div style="font-size:26px;">${stamp.icon}</div>
-      <div style="font-size:17px;font-weight:800;color:${sc.text};margin-top:6px;letter-spacing:0.3px;">${stamp.label}</div>
+      <div style="font-size:17px;font-weight:800;color:${sc.text};margin-top:6px;letter-spacing:0.3px;">${displayLabel}</div>
       <div style="font-size:10px;color:${sc.text};opacity:0.7;margin-top:5px;line-height:1.4;">${stamp.reasons.join(" · ")}</div>
+      ${affiliateBuyUrl ? `
+      <a id="nirnai-affiliate-buy" href="${affiliateBuyUrl}" target="_blank" rel="noopener nofollow sponsored"
+         style="display:inline-flex;align-items:center;justify-content:center;gap:6px;margin-top:12px;padding:9px 18px;font-size:12px;font-weight:800;color:#fff;background:${sc.border};border-radius:8px;text-decoration:none;letter-spacing:0.4px;box-shadow:0 4px 14px ${sc.glow};transition:transform 0.15s,box-shadow 0.15s;"
+         onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 18px ${sc.glow}'"
+         onmouseout="this.style.transform='none';this.style.boxShadow='0 4px 14px ${sc.glow}'">
+        🛒 Buy on Amazon →
+      </a>
+      <div style="font-size:9px;color:${sc.text};opacity:0.6;margin-top:6px;line-height:1.3;">Affiliate link · As an Amazon Associate we may earn a commission</div>
+      ` : ""}
     </div>
     <div style="padding:14px 18px;">
       ${scoreBar("Purchase Score", "🛒", analysis.purchase_score, purchaseColor)}
@@ -390,7 +581,7 @@ function showResultPanel(analysis: AnalysisResponse): void {
       <div style="background:#111827;border-radius:12px;padding:12px 14px;border:1px solid #1e293b;">
         <div style="font-size:12px;font-weight:700;color:#818cf8;margin-bottom:4px;">${analysis.suggestion.product_name}</div>
         <div style="font-size:10px;line-height:1.45;color:#94a3b8;margin-bottom:10px;">${analysis.suggestion.reason}</div>
-        <div id="nirnai-suggestion-rank" data-url="${analysis.suggestion.search_url}" data-name="${analysis.suggestion.product_name}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
+        <div id="nirnai-suggestion-rank" data-url="${analysis.suggestion.search_url}" data-name="${analysis.suggestion.product_name}" data-domain="${analysis.domain || ""}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;background:#6366f1;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 2px 8px rgba(99,102,241,0.3);" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">🏆 Rank alternatives</div>
       </div>
     </div>` : ""}
     <div style="padding:10px 18px;border-top:1px solid #1e293b;display:flex;align-items:center;gap:8px;">
@@ -429,9 +620,91 @@ function showResultPanel(analysis: AnalysisResponse): void {
     });
   });
 
+  // ── Pre-checkout price recheck on the BUY CTA ──
+  // Goal: don't let an affiliate redirect happen if the price the user is
+  // looking at has drifted >10% from when we scored it. Fail-open — any
+  // network error or unknown product just lets the click proceed.
+  attachAffiliateRecheck(productSnapshotForRecheck());
+
   // "Rank alternatives" button → triggers cross-site comparison across ALL platforms
   attachRankAlternativesHandler();
 }
+
+/**
+ * Build a CATEGORY-based search query for finding ALTERNATIVES.
+ * The goal is NOT to find the same product — it's to find COMPETING products
+ * in the same category from different brands.
+ *
+ * Strategy:
+ * 1. Use the page's breadcrumb category if available (most reliable)
+ * 2. Extract product TYPE keywords from the title (strip brand, model, size, quantity)
+ * 3. Keep only category-descriptive words: "acne patches", "wireless earbuds", "running shoes"
+ *
+ * "PanOxyl PM Overnight Spot Patches, Advanced Hydrocolloid Healing Technology, Fragrance Free, 40 Count Pack of 1"
+ *   → "hydrocolloid acne spot patches"
+ * "SEKKISEI Emulsion 2 Bottles Set 4.7oz & 2.3oz"
+ *   → "facial emulsion moisturizer"
+ */
+function buildCategorySearchQuery(productName: string, originalTitle?: string, category?: string): string {
+  // Strategy 1: Use breadcrumb category if it's descriptive enough
+  if (category) {
+    const catWords = category.toLowerCase()
+      .replace(/[&>]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .filter(w => !BRAND_WORDS.has(w) && !FILLER_WORDS.has(w));
+    if (catWords.length >= 2) {
+      return catWords.slice(0, 4).join(" ");
+    }
+  }
+
+  // Strategy 2: Extract product TYPE from title — strip brand, sizes, quantities
+  const title = originalTitle || productName;
+  const words = title
+    .replace(/['"()[\]{}]/g, "")
+    .replace(/,/g, " ")
+    .split(/[\s/\-–—]+/)
+    .map(w => w.replace(/[^a-zA-Z]/g, "").toLowerCase())
+    .filter(w => w.length > 2);
+
+  // Skip brand (first 1-2 words), strip sizes/quantities/filler
+  const typeWords: string[] = [];
+  let skippedBrand = false;
+  for (const w of words) {
+    // Skip brand-like words at the start
+    if (!skippedBrand && (BRAND_WORDS.has(w) || /^[A-Z]{2,}$/.test(w))) continue;
+    skippedBrand = true;
+
+    // Skip size, quantity, model number patterns
+    if (FILLER_WORDS.has(w)) continue;
+    if (SIZE_PATTERN.test(w)) continue;
+    if (/^\d+$/.test(w)) continue;
+
+    typeWords.push(w);
+    if (typeWords.length >= 5) break;
+  }
+
+  if (typeWords.length >= 2) {
+    return typeWords.join(" ");
+  }
+
+  // Strategy 3: Fallback — just remove first word (brand) and take a few words
+  return words.slice(1, 5).join(" ") || words.join(" ");
+}
+
+const BRAND_WORDS = new Set([
+  "visit", "store", "brand", "official", "authentic", "genuine",
+]);
+const FILLER_WORDS = new Set([
+  "the", "and", "for", "with", "from", "this", "that", "its",
+  "new", "best", "top", "premium", "deluxe", "original", "official",
+  "pack", "set", "piece", "count", "size", "each", "total",
+  "free", "includes", "included", "bonus", "bundle",
+  "oz", "ounce", "ml", "liter", "gram", "lb", "kg",
+  "inch", "inches", "cm", "mm", "ft",
+  "qty", "quantity",
+]);
+const SIZE_PATTERN = /^(\d+\.?\d*)(oz|ml|mg|g|kg|lb|ct|pk|pc|in|cm|mm|fl)$/i;
 
 /** Attach click handler to #nirnai-suggestion-rank. Safe to call multiple times — idempotent. */
 function attachRankAlternativesHandler(): void {
@@ -452,9 +725,10 @@ function attachRankAlternativesHandler(): void {
 
     const currentHost = window.location.hostname.toLowerCase();
 
-    // Detect whether we're on a travel or shopping site
-    const TRAVEL_HOSTS = ["airbnb", "booking", "expedia", "vrbo", "agoda", "hotels", "tripadvisor", "google.com/travel"];
-    const isTravelSite = TRAVEL_HOSTS.some(h => currentHost.includes(h));
+    // Detect whether we're on a travel or shopping site — prefer backend domain
+    const backendDomain = btn.dataset.domain || "";
+    const TRAVEL_HOSTS = ["airbnb", "booking", "expedia", "vrbo", "agoda", "hotels", "tripadvisor", "google.com/travel", "makemytrip", "goibibo", "ixigo", "cleartrip", "yatra", "easemytrip"];
+    const isTravelSite = backendDomain === "hospitality" || TRAVEL_HOSTS.some(h => currentHost.includes(h));
     const siteCategory = isTravelSite ? "travel" : "shopping";
 
     // Detect origin site name from hostname
@@ -466,6 +740,8 @@ function attachRankAlternativesHandler(): void {
       "lowes": "lowes", "ebay": "ebay", "wayfair": "wayfair", "macys": "macys",
       "nordstrom": "nordstrom", "cvs": "cvs", "walgreens": "walgreens",
       "nike": "nike", "apple.com/shop": "apple", "samsung": "samsung", "dyson": "dyson",
+      "makemytrip": "makemytrip", "goibibo": "goibibo", "ixigo": "ixigo",
+      "cleartrip": "cleartrip", "yatra": "yatra", "easemytrip": "easemytrip",
     };
     let originSite = "";
     for (const [hostFragment, siteName] of Object.entries(SITE_HOST_MAP)) {
@@ -483,11 +759,13 @@ function attachRankAlternativesHandler(): void {
     let swLat: number | undefined, swLng: number | undefined;
     let areaType: "dense_urban" | "urban" | "suburban" | "resort" | "rural" | undefined;
     let radiusMiles: number | undefined;
+    let originProductData: ProductData | null = null;
 
     if (isTravelSite && extractor) {
       // 1. Extract product data from page — barcode has location, dates, guests
       try {
         const productData = extractor.extractProduct();
+        originProductData = productData;
         const ctx = productData.barcode || "";
         const ctxParams = new URLSearchParams(ctx.replace(/^search_base_url=[^&]*&?/, ""));
         destination = ctxParams.get("location") || "";
@@ -597,8 +875,14 @@ function attachRankAlternativesHandler(): void {
         swLng = centerLng! - lngDelta;
       }
     } else {
-      // Shopping: use product name as search query
-      query = productName;
+      // Shopping: extract product data first so we have the original title
+      if (extractor) {
+        try { originProductData = extractor.extractProduct(); } catch { /* ignore */ }
+      }
+      // Build a CATEGORY search query — find competing products, NOT the same product
+      // "PanOxyl PM Overnight Spot Patches..." → "hydrocolloid acne spot patches"
+      query = buildCategorySearchQuery(productName, originProductData?.title, originProductData?.category);
+      console.log(`NirnAI: Category search query: "${productName}" → "${query}"`);
     }
 
     const geo = detectGeoContext();
@@ -633,13 +917,14 @@ function attachRankAlternativesHandler(): void {
     chrome.runtime.sendMessage({
       action: "CROSS_SITE_COMPARE",
       originSite,
-      listings: [],
+      listings: originProductData ? [originProductData] : [],
       searchParams,
       searchContext: isTravelSite
         ? `Cross-site search for ${destination || "this area"}${areaType ? ` (${areaType.replace("_", " ")}, ~${radiusMiles}mi radius)` : ""}. Dates: ${checkin || "flexible"} to ${checkout || "flexible"}. Guests: ${adults} adults${children ? `, ${children} children` : ""}. Coordinates: ${centerLat != null ? `${centerLat!.toFixed(4)},${centerLng!.toFixed(4)}` : "unknown"}. User wants alternatives to current listing.`
-        : `User wants cross-site alternatives for: "${productName}"`,
+        : `FIND ALTERNATIVES: User is viewing "${productName}" and wants to discover BETTER options in the same category from DIFFERENT brands. The original product is included as a baseline — rank it fairly but prioritize finding genuinely different alternatives. Category search: "${query}"`,
       includeOrigin: true,
       siteCategory,
+      productDomain: backendDomain || "",
     } as any);
   });
 }
@@ -647,9 +932,11 @@ function attachRankAlternativesHandler(): void {
 function showCollapsedBadge(analysis: AnalysisResponse): void {
   document.getElementById(BADGE_ID)?.remove();
   const stamp = analysis.stamp;
+  // Backend is single source of truth for labels
+  const displayLabel = stamp.label;
   const colors: Record<string, { bg: string; border: string; text: string }> = {
     SMART_BUY: { bg: "rgba(5,150,105,0.15)", border: "#059669", text: "#34d399" },
-    CHECK:     { bg: "rgba(217,119,6,0.15)", border: "#d97706", text: "#fbbf24" },
+    CHECK:     { bg: "rgba(5,150,105,0.15)", border: "#059669", text: "#34d399" },
     AVOID:     { bg: "rgba(220,38,38,0.15)", border: "#dc2626", text: "#f87171" },
   };
   const c = colors[stamp.stamp] || colors.CHECK;
@@ -667,7 +954,7 @@ function showCollapsedBadge(analysis: AnalysisResponse): void {
     transition: transform 0.2s, box-shadow 0.2s;
     backdrop-filter: blur(12px);
   `;
-  badge.textContent = `${stamp.icon} ${stamp.label}`;
+  badge.textContent = `${stamp.icon} ${displayLabel}`;
   badge.title = "Click to expand NirnAI analysis";
   badge.addEventListener("mouseenter", () => { badge.style.transform = "scale(1.05)"; });
   badge.addEventListener("mouseleave", () => { badge.style.transform = "scale(1)"; });
@@ -748,6 +1035,8 @@ function showCartResultPanel(cartResponse: CartAnalysisResponse, limitedDataUrls
       AVOID:     { bg: "rgba(248,113,113,0.1)", text: "#f87171" },
     };
     const sc = stampColors[item.stamp.stamp] || stampColors.CHECK;
+    // Backend is single source of truth for labels
+    const cartLabel = item.stamp.label;
     const shortTitle = item.title.length > 55 ? item.title.slice(0, 52) + "..." : item.title;
     const priceStr = item.price ? ` \u2022 ${item.price}` : "";
     const isLimited = limitedDataUrls?.has(item.url || "") ?? false;
@@ -758,7 +1047,7 @@ function showCartResultPanel(cartResponse: CartAnalysisResponse, limitedDataUrls
         <div style="flex:1;min-width:0;">
           <div style="font-size:12px;line-height:1.3;margin-bottom:5px;">${shortTitle}</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <span style="background:${sc.bg};color:${sc.text};padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;">${item.stamp.icon} ${item.stamp.label}</span>
+            <span style="background:${sc.bg};color:${sc.text};padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;">${item.stamp.icon} ${cartLabel}</span>
             <span style="font-size:10px;opacity:0.5;">Score: ${item.purchase_score}${priceStr}</span>
             ${isLimited ? `<span style="font-size:9px;color:#94a3b8;background:#1e293b;padding:1px 6px;border-radius:4px;">Limited data</span>` : ""}
           </div>

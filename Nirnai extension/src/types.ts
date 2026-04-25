@@ -118,6 +118,7 @@ export interface RankedListing {
   tradeoffs: string[];
   positives: string[];
   warnings: string[];
+  domain: string;
 }
 
 export interface BatchResponse {
@@ -139,6 +140,7 @@ export interface AnalysisResponse {
   confidence: number;
   summary: string;
   suggestion?: AlternativeSuggestion | null;
+  domain: string;
 }
 
 export interface AiEnhancement {

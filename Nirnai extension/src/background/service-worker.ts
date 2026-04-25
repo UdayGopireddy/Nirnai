@@ -317,7 +317,8 @@ async function analyzeCart(
 
 async function startCompare(
   listings: ProductData[],
-  searchContext: string
+  searchContext: string,
+  originProduct?: ProductData | null
 ): Promise<{ id: string; url: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -327,7 +328,11 @@ async function startCompare(
     response = await fetch(`${API_BASE_URL}/compare/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ listings, search_context: searchContext }),
+      body: JSON.stringify({
+        listings,
+        search_context: searchContext,
+        origin_product: originProduct ?? null,
+      }),
       signal: controller.signal,
     });
   } finally {
@@ -344,8 +349,8 @@ async function startCompare(
 
 // ── Cross-Site Comparison Orchestration ──────────────────────────────────────
 
-const TRAVEL_SITES = ["airbnb", "booking", "expedia", "hotels", "vrbo", "agoda", "tripadvisor", "googletravel"];
-const SHOPPING_SITES = ["amazon", "walmart", "target", "costco", "bestbuy", "homedepot", "lowes", "ebay", "wayfair", "macys", "nordstrom", "cvs", "walgreens", "nike", "apple", "samsung", "dyson"];
+const TRAVEL_SITES = ["airbnb", "booking", "expedia", "hotels", "vrbo", "agoda", "tripadvisor", "googletravel", "makemytrip", "ixigo", "goibibo", "cleartrip", "yatra", "easemytrip"];
+const SHOPPING_SITES = ["amazon", "walmart", "target", "costco", "bestbuy", "homedepot", "lowes", "ebay", "wayfair", "macys", "nordstrom", "cvs", "walgreens", "nike", "apple", "samsung", "dyson", "flipkart", "myntra", "nykaa", "meesho", "ajio"];
 
 // Mapping of site name → function that builds search URL from common params.
 // These mirror the registerSearchUrlBuilder calls in the content extractors,
@@ -467,6 +472,61 @@ function buildCrossSiteUrl(site: string, params: CrossSiteSearchParams): string 
       }
       return url;
     }
+    case "makemytrip": {
+      const sp = new URLSearchParams();
+      if (params.destination) sp.set("searchText", params.destination);
+      if (params.checkin) sp.set("checkin", params.checkin.replace(/-/g, ""));
+      if (params.checkout) sp.set("checkout", params.checkout.replace(/-/g, ""));
+      if (params.adults) sp.set("roomStayQualifier", `${params.adults}e0e`);
+      return `https://www.makemytrip.com/hotels/hotel-listing/?${sp.toString()}`;
+    }
+    case "ixigo": {
+      const sp = new URLSearchParams();
+      if (params.destination) sp.set("city", params.destination);
+      if (params.checkin) sp.set("checkin", params.checkin);
+      if (params.checkout) sp.set("checkout", params.checkout);
+      if (params.adults) sp.set("adults", params.adults);
+      if (params.children) sp.set("children", params.children);
+      sp.set("rooms", params.rooms || "1");
+      return `https://www.ixigo.com/search/result/hotel?${sp.toString()}`;
+    }
+    case "goibibo": {
+      const slug = params.destination.replace(/\s+/g, "-");
+      const sp = new URLSearchParams();
+      if (params.checkin) sp.set("checkin", params.checkin);
+      if (params.checkout) sp.set("checkout", params.checkout);
+      if (params.adults) sp.set("guests", params.adults);
+      sp.set("rooms", params.rooms || "1");
+      return `https://www.goibibo.com/hotels/hotels-in-${encodeURIComponent(slug)}-ct/?${sp.toString()}`;
+    }
+    case "cleartrip": {
+      const sp = new URLSearchParams();
+      if (params.destination) sp.set("city", params.destination);
+      if (params.checkin) sp.set("chk_in", params.checkin);
+      if (params.checkout) sp.set("chk_out", params.checkout);
+      if (params.adults) sp.set("adults", params.adults);
+      if (params.children) sp.set("childs", params.children);
+      sp.set("num_rooms", params.rooms || "1");
+      return `https://www.cleartrip.com/hotels/results?${sp.toString()}`;
+    }
+    case "yatra": {
+      const sp = new URLSearchParams();
+      if (params.destination) sp.set("searchCriteria", params.destination);
+      if (params.checkin) sp.set("checkIn", params.checkin);
+      if (params.checkout) sp.set("checkOut", params.checkout);
+      if (params.adults) sp.set("paxInfoStr", `${params.adults}-0-0`);
+      sp.set("roomCount", params.rooms || "1");
+      return `https://www.yatra.com/hotels/search/result?${sp.toString()}`;
+    }
+    case "easemytrip": {
+      const sp = new URLSearchParams();
+      if (params.destination) sp.set("city", params.destination);
+      if (params.checkin) sp.set("checkin", params.checkin);
+      if (params.checkout) sp.set("checkout", params.checkout);
+      if (params.adults) sp.set("adults", params.adults);
+      sp.set("rooms", params.rooms || "1");
+      return `https://www.easemytrip.com/hotels/search?${sp.toString()}`;
+    }
     // Shopping sites
     case "amazon": {
       if (!params.query) return "";
@@ -536,6 +596,26 @@ function buildCrossSiteUrl(site: string, params: CrossSiteSearchParams): string 
       if (!params.query) return "";
       return `https://www.dyson.com/search#q=${encodeURIComponent(params.query)}`;
     }
+    case "flipkart": {
+      if (!params.query) return "";
+      return `https://www.flipkart.com/search?q=${encodeURIComponent(params.query)}`;
+    }
+    case "myntra": {
+      if (!params.query) return "";
+      return `https://www.myntra.com/${encodeURIComponent(params.query.replace(/\s+/g, "-"))}`;
+    }
+    case "nykaa": {
+      if (!params.query) return "";
+      return `https://www.nykaa.com/search/result/?q=${encodeURIComponent(params.query)}`;
+    }
+    case "meesho": {
+      if (!params.query) return "";
+      return `https://www.meesho.com/search?q=${encodeURIComponent(params.query)}`;
+    }
+    case "ajio": {
+      if (!params.query) return "";
+      return `https://www.ajio.com/search/?text=${encodeURIComponent(params.query)}`;
+    }
     default:
       return "";
   }
@@ -576,6 +656,12 @@ const TRAVEL_SOURCE_PROFILES: Record<string, SourceProfile> = {
   vrbo:         { role: "expander", reliabilityWeight: 0.65 },
   tripadvisor:  { role: "enricher", reliabilityWeight: 0.3 },
   googletravel: { role: "enricher", reliabilityWeight: 0.2 },
+  makemytrip:   { role: "expander", reliabilityWeight: 0.7 },
+  ixigo:        { role: "expander", reliabilityWeight: 0.5 },
+  goibibo:      { role: "expander", reliabilityWeight: 0.65 },
+  cleartrip:    { role: "expander", reliabilityWeight: 0.55 },
+  yatra:        { role: "expander", reliabilityWeight: 0.5 },
+  easemytrip:   { role: "expander", reliabilityWeight: 0.45 },
 };
 
 const SHOPPING_SOURCE_PROFILES: Record<string, SourceProfile> = {
@@ -587,6 +673,11 @@ const SHOPPING_SOURCE_PROFILES: Record<string, SourceProfile> = {
   homedepot: { role: "expander", reliabilityWeight: 0.6 },
   lowes:     { role: "expander", reliabilityWeight: 0.55 },
   ebay:      { role: "enricher", reliabilityWeight: 0.4 },
+  flipkart:  { role: "core",     reliabilityWeight: 0.9 },
+  myntra:    { role: "expander", reliabilityWeight: 0.7 },
+  nykaa:     { role: "expander", reliabilityWeight: 0.65 },
+  meesho:    { role: "expander", reliabilityWeight: 0.6 },
+  ajio:      { role: "expander", reliabilityWeight: 0.6 },
   wayfair:   { role: "enricher", reliabilityWeight: 0.35 },
 };
 
@@ -752,7 +843,46 @@ function finishCrossSiteCollection(): void {
     }
   }
 
-  const rawListings = [...session.originListings, ...session.collectedListings];
+  // Origin listings go first (rich product-page data); collected listings appended
+  const combined = [...session.originListings, ...session.collectedListings];
+
+  // Dedup: remove listings that are the SAME product as the origin.
+  // For alternatives flow, we want DIFFERENT products — the user already knows the origin.
+  const originUrls = new Set(
+    session.originListings.map((l: any) => (l.url || "").split("?")[0].replace(/\/+$/, "").toLowerCase()).filter(Boolean)
+  );
+  const originTitles = session.originListings.map((l: any) => (l.title || "").toLowerCase().trim()).filter(Boolean);
+
+  // Helper: check if a title is too similar to the origin product
+  const isSameAsOrigin = (l: any): boolean => {
+    const url = (l.url || "").split("?")[0].replace(/\/+$/, "").toLowerCase();
+    if (url && originUrls.has(url)) return true;
+    const title = (l.title || "").toLowerCase().trim();
+    for (const origTitle of originTitles) {
+      if (!origTitle || !title) continue;
+      // Exact match
+      if (title === origTitle) return true;
+      // Substring match (GPT often truncates)
+      if (title.length > 20 && origTitle.length > 20) {
+        if (title.includes(origTitle.slice(0, 30)) || origTitle.includes(title.slice(0, 30))) return true;
+      }
+    }
+    return false;
+  };
+
+  // Separate: origin product (for context) vs alternatives (for ranking)
+  const originProduct = session.originListings[0] || null;
+  const alternatives = combined.filter((l: any, idx: number) => !isSameAsOrigin(l));
+
+  // Also dedup collected alternatives against each other (same product from multiple sites)
+  const seenTitles = new Set<string>();
+  const rawListings = alternatives.filter((l: any) => {
+    const title = (l.title || "").toLowerCase().trim().slice(0, 40);
+    if (seenTitles.has(title)) return false;
+    seenTitles.add(title);
+    return true;
+  });
+
   const sourcesUsed = [...session.sitesReported];
 
   // Classify sources for the summary
@@ -876,9 +1006,11 @@ function finishCrossSiteCollection(): void {
   }).catch(() => {});
 
   const crossSiteContext = session.searchContext +
-    `\n\nCROSS-SITE COMPARISON: ${finalListings.length} listings from ${sourcesUsed.length} platforms ` +
+    `\n\nCROSS-SITE COMPARISON: ${finalListings.length} alternative listings from ${sourcesUsed.length} platforms ` +
     `(core: ${coreUsed.join(", ")}${expanderUsed.length ? "; supporting: " + expanderUsed.join(", ") : ""}). ` +
-    `Collected in ${elapsed}s. Rank purely by value — do NOT favor any platform. Note the source site for each listing.`;
+    `Collected in ${elapsed}s. These are ALTERNATIVES to the user's original product. ` +
+    `Rank them by which is the BEST alternative — consider value, trust, and quality. ` +
+    (originProduct ? `\n\nORIGINAL PRODUCT (for reference — do NOT include in ranking):\nTitle: ${(originProduct as any).title || "unknown"}\nPrice: ${(originProduct as any).price || "unknown"}\nRating: ${(originProduct as any).rating || "unknown"}\nReviews: ${(originProduct as any).reviewCount || "unknown"}\nSource: ${(originProduct as any).source_site || "unknown"}\nURL: ${(originProduct as any).url || "unknown"}\nThe user wants to know if any of these alternatives are BETTER than this product.` : "");
 
   console.log(`NirnAI: Sending ${finalListings.length} listings to /compare/start...`);
   // Log FULL listing details for debugging cross-site distribution
@@ -886,7 +1018,7 @@ function finishCrossSiteCollection(): void {
     console.log(`NirnAI: → [${(l as any).source_site || "?"}] "${(l as any).title?.slice(0,60) || "no title"}" | price=${(l as any).price || "none"} | url=${(l as any).url?.slice(0,80) || "none"}`);
   }
 
-  startCompare(finalListings, crossSiteContext)
+  startCompare(finalListings, crossSiteContext, originProduct)
     .then((result) => {
       const compareUrl = result.url.startsWith("http") ? result.url : `${API_BASE_URL}${result.url}`;
       console.log(`NirnAI: /compare/start returned — navigating to ${compareUrl}`);
@@ -987,10 +1119,30 @@ chrome.runtime.onMessage.addListener(
       const originTabId = _sender.tab?.id || 0;
       const includeOrigin = !!msg.includeOrigin; // true when triggered from product page
       const siteCategory = msg.siteCategory as string | undefined; // "travel" | "shopping"
+      const productDomain = (msg.productDomain as string || "general").toLowerCase();
 
       // Determine which sites to query
       const isTravelSite = siteCategory === "travel" || TRAVEL_SITES.includes(originSite);
-      const sitePool = isTravelSite ? TRAVEL_SITES : SHOPPING_SITES;
+      let sitePool = isTravelSite ? TRAVEL_SITES : SHOPPING_SITES;
+
+      // For shopping, filter sites to relevant categories based on product domain
+      if (!isTravelSite && productDomain) {
+        const DOMAIN_SITES: Record<string, string[]> = {
+          fashion:     ["amazon", "walmart", "target", "ebay", "macys", "nordstrom", "nike"],
+          electronics: ["amazon", "walmart", "target", "bestbuy", "costco", "ebay"],
+          grocery:     ["amazon", "walmart", "target", "costco", "cvs", "walgreens"],
+          home:        ["amazon", "walmart", "target", "costco", "homedepot", "lowes", "wayfair", "ebay"],
+          general:     ["amazon", "walmart", "target", "costco", "ebay"],
+        };
+        const relevantSites = DOMAIN_SITES[productDomain] || DOMAIN_SITES.general;
+        sitePool = relevantSites.filter(s => SHOPPING_SITES.includes(s));
+        // Always include the origin site — it has the best alternatives in the same category
+        if (originSite && !sitePool.includes(originSite) && SHOPPING_SITES.includes(originSite)) {
+          sitePool.unshift(originSite);
+        }
+        console.log(`NirnAI: Filtered shopping sites for domain="${productDomain}": [${sitePool.join(", ")}]`);
+      }
+
       const sourceProfiles = isTravelSite ? TRAVEL_SOURCE_PROFILES : SHOPPING_SOURCE_PROFILES;
       const otherSites = includeOrigin
         ? sitePool

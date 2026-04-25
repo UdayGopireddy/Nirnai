@@ -60,7 +60,7 @@ interface ProductData {
 }
 
 interface DecisionStamp {
-  stamp: "SMART_BUY" | "CHECK" | "AVOID";
+  stamp: "SMART_BUY" | "CHECK" | "CAUTION" | "AVOID";
   label: string;
   icon: string;
   reasons: string[];
@@ -126,15 +126,19 @@ function renderStamp(analysis: AnalysisResponse) {
   const stamp = analysis.stamp;
   banner.className = "stamp-banner";
 
+  // Backend is single source of truth for labels
+  const displayLabel = stamp.label;
+
   const classMap: Record<string, string> = {
     SMART_BUY: "smart-buy",
     CHECK: "check",
+    CAUTION: "caution",
     AVOID: "avoid",
   };
-  banner.classList.add(classMap[stamp.stamp] || "check");
+  banner.classList.add(classMap[stamp.stamp] || "caution");
 
   icon.textContent = stamp.icon;
-  label.textContent = stamp.label;
+  label.textContent = displayLabel;
   reasons.textContent = stamp.reasons.join(" • ");
 
   purchaseSignal.textContent = stamp.purchase_signal ? `🛒 ${stamp.purchase_signal}` : "";
@@ -251,9 +255,8 @@ function renderScores(analysis: AnalysisResponse) {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const tabHost = tab?.url ? new URL(tab.url).hostname.toLowerCase() : "";
 
-      // Detect whether the user is on a travel or shopping site
-      const TRAVEL_HOSTS = ["airbnb", "booking", "expedia", "vrbo", "agoda", "hotels", "tripadvisor", "google.com/travel"];
-      const isTravelSite = TRAVEL_HOSTS.some(h => tabHost.includes(h));
+      // Detect whether the user is on a travel or shopping site — prefer backend domain
+      const isTravelSite = analysis.domain === "hospitality";
       const siteCategory = isTravelSite ? "travel" : "shopping";
 
       // Detect origin site name

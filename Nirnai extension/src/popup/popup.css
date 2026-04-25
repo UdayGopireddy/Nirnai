@@ -160,6 +160,11 @@ body {
   border: 1px solid var(--orange-border);
 }
 
+.stamp-banner.caution {
+  background: var(--orange-bg);
+  border: 1px solid var(--orange-border);
+}
+
 .stamp-banner.avoid {
   background: var(--red-bg);
   border: 1px solid var(--red-border);
@@ -184,6 +189,7 @@ body {
 
 .stamp-banner.smart-buy .stamp-label { color: var(--green); }
 .stamp-banner.check .stamp-label { color: var(--orange); }
+.stamp-banner.caution .stamp-label { color: var(--orange); }
 .stamp-banner.avoid .stamp-label { color: var(--red); }
 
 .stamp-reasons {
@@ -195,6 +201,7 @@ body {
 
 .stamp-banner.smart-buy .stamp-reasons { color: var(--green); }
 .stamp-banner.check .stamp-reasons { color: var(--orange); }
+.stamp-banner.caution .stamp-reasons { color: var(--orange); }
 .stamp-banner.avoid .stamp-reasons { color: var(--red); }
 
 .stamp-signals {
