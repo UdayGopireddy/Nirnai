@@ -222,6 +222,10 @@ pub struct BatchResponse {
     /// True when the user's original product is better than every alternative found.
     #[serde(default)]
     pub origin_is_best: bool,
+    /// India dual-track: same listings sorted cheapest first. Empty for
+    /// non-India batches. Drives the "Best Deal" tab in the compare UI.
+    #[serde(default)]
+    pub ranked_by_price: Vec<RankedListing>,
 }
 
 // ── Agent-backed API client ──

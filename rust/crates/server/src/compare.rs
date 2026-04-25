@@ -706,6 +706,7 @@ fn synthesize_session_from_inventory(
 
     let response = BatchResponse {
         ranked,
+        ranked_by_price: Vec::new(),
         comparison_summary,
         origin_title: String::new(),
         origin_purchase_score: 0,
@@ -1645,7 +1646,21 @@ fn build_compare_html(session_id: &str) -> String {
 
       const app = document.getElementById("app");
       const batch = data.result;
-      const ranked = batch.ranked || [];
+
+      // India dual-track support: backend returns `ranked_by_price` (cheapest
+      // first) alongside the default quality-ordered `ranked`. The toggle is
+      // only rendered when the price track is non-empty.
+      const _hasPriceTrack = Array.isArray(batch.ranked_by_price) && batch.ranked_by_price.length > 0;
+      const _mode = (_hasPriceTrack && window._rankMode === "price") ? "price" : "quality";
+      const ranked = (_mode === "price") ? batch.ranked_by_price : (batch.ranked || []);
+      // Cache the latest payload so the tab toggle can re-render without a
+      // round-trip to the server.
+      window._lastBatch = data;
+      window.selectRankTab = function(m) {{
+        window._rankMode = m;
+        renderResults(window._lastBatch);
+      }};
+
       if (ranked.length === 0) {{ app.innerHTML = `<div class="error"><h2>No results</h2></div>`; return; }}
 
       const top = ranked[0];
@@ -1677,6 +1692,19 @@ fn build_compare_html(session_id: &str) -> String {
       );
 
       let html = "";
+
+      // ═══ INDIA DUAL-TRACK TOGGLE ═══
+      // Two pills: "Best Pick" (quality-ranked) and "Best Deal" (price-ranked).
+      // Indian shoppers split their decision between trust and price; this lets
+      // them swap views without leaving the page. Hidden for non-India batches.
+      if (_hasPriceTrack) {{
+        const qActive = _mode === "quality" ? "background:#1a1d2e;color:#fff;" : "background:transparent;color:#5a6478;";
+        const pActive = _mode === "price"   ? "background:#1a1d2e;color:#fff;" : "background:transparent;color:#5a6478;";
+        html += `<div style="display:flex;gap:6px;padding:6px;background:#e8ebf0;border-radius:14px;margin-bottom:16px;width:fit-content;">
+          <button onclick="selectRankTab('quality')" style="border:none;cursor:pointer;font:inherit;font-weight:600;padding:8px 16px;border-radius:10px;${{qActive}}">🏆 Best Pick</button>
+          <button onclick="selectRankTab('price')"   style="border:none;cursor:pointer;font:inherit;font-weight:600;padding:8px 16px;border-radius:10px;${{pActive}}">💰 Best Deal</button>
+        </div>`;
+      }}
 
       // ═══ ORIGIN IS BEST — user's product beats all alternatives ═══
       if (batch.origin_is_best && batch.origin_title) {{
