@@ -713,6 +713,37 @@ def _currency_symbol(raw: str) -> str:
     return ""
 
 
+def _repair_inr_decimal(raw: str) -> str:
+    """Repair amazon.in prices that lost their decimal during DOM extraction.
+
+    Amazon's price block injects the decimal between `.a-price-whole` and
+    `.a-price-fraction`. When an extractor concatenates those textContents
+    naively, "399.00" collapses to "39900". Spotting it: INR price, no
+    decimal already, no Indian-numbering comma, last two digits are "00".
+
+    Real Indian prices >= 1000 always carry the lakh/crore comma in
+    `.a-price-whole` text (e.g. "39,900" not "39900"), so the absence of a
+    comma is the giveaway. Conservative — only patch four+ digit values so we
+    leave plain "Rs 399" alone.
+    """
+    if not raw:
+        return raw
+    s = raw.strip()
+    if _currency_symbol(s) != "INR":
+        return raw
+    if "." in s or "," in s:
+        return raw
+    m = re.search(r"(\d{4,})\s*$", s)
+    if not m:
+        return raw
+    digits = m.group(1)
+    if not digits.endswith("00"):
+        return raw
+    rupees = digits[:-2]
+    paise = digits[-2:]
+    return s[: m.start()] + f"{rupees}.{paise}"
+
+
 def _enrich_dual_track(batch, req, origin_score: int, origin_trust: int,
                         origin_price: str, origin_product) -> None:
     """Populate price_delta_pct, sku_match, seller_*, and tab headlines.
@@ -727,11 +758,14 @@ def _enrich_dual_track(batch, req, origin_score: int, origin_trust: int,
 
     origin_title = (origin_product.title if origin_product else "") or ""
     origin_brand = (origin_product.brand if origin_product else "") or ""
+    origin_price = _repair_inr_decimal(origin_price)
     origin_price_value = _parse_price_number(origin_price)
     origin_currency = _currency_symbol(origin_price)
 
     def _enrich_list(items):
         for item in items:
+            if item.price:
+                item.price = _repair_inr_decimal(item.price)
             item.price_value = _parse_price_number(item.price or "")
             # Only compute a percentage when we can compare like-for-like.
             # Cross-currency comparisons (₹399 vs $12) are meaningless without
@@ -1279,7 +1313,7 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
         batch.origin_purchase_score = origin_score
         batch.origin_trust_score = origin_trust
         batch.origin_url = origin_url
-        batch.origin_price = origin_price
+        batch.origin_price = _repair_inr_decimal(origin_price)
 
         # ── "Your pick is the best" detection ──
         # If the user's original product beats EVERY alternative on purchase_score
