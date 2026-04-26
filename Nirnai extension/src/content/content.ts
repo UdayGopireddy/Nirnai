@@ -750,16 +750,9 @@ function rankAlternativesButtonsHtml(productName: string, searchUrl: string, dom
   const baseAttrs = `data-url="${searchUrl}" data-name="${productName}" data-domain="${domain}"`;
   const baseStyle = "display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;";
 
-  if (!isIndiaHost()) {
-    return `<div id="nirnai-suggestion-rank" ${baseAttrs} data-mode="quality"
-      style="${baseStyle}background:#6366f1;box-shadow:0 2px 8px rgba(99,102,241,0.3);"
-      onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.4)'"
-      onmouseout="this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(99,102,241,0.3)'">
-      🏆 Rank alternatives</div>`;
-  }
-
-  // India: two pills. Same id on the first so existing handler attaches; the
-  // second gets a sibling id and shares the click flow via querySelectorAll.
+  // Dual pills (Best Pick / Best Deal) on every host. The backend produces
+  // both ranked and ranked_by_price arrays for every batch, so US shoppers
+  // benefit from the choice exactly as much as India shoppers do.
   return `
     <div style="display:flex;gap:6px;flex-wrap:wrap;">
       <div id="nirnai-suggestion-rank" class="nirnai-rank-btn" ${baseAttrs} data-mode="quality"

@@ -1221,11 +1221,16 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
                                 item.price, fixed, item.title[:40])
                     item.price = fixed
 
-    # Re-rank to correct AI misjudgments. India batches get a dual track:
-    # • `ranked`           — quality-first (purchase_score desc), same as US.
-    # • `ranked_by_price`  — same listings reordered cheapest-first so the
-    #   extension UI can show a side-by-side "Best Pick" / "Best Deal" toggle.
-    # US / default batches only get `ranked`; `ranked_by_price` stays empty.
+    # Re-rank to correct AI misjudgments. Two parallel dual-track streams,
+    # kept deliberately separate so India tuning never touches US tuning and
+    # vice versa:
+    # • India branch — INR parser, lakh/crore commas, MRP nuances.
+    # • US branch    — USD parser, decimal-cents, no Indian-numbering edge
+    #   cases. Built independently so future US-only price logic (deal price
+    #   vs list price, prime-only filtering, ...) can land here without
+    #   destabilising the India scorer.
+    # Both populate `ranked_by_price` so the popup's Best Pick / Best Deal
+    # pills work identically across locales.
     if batch.ranked:
         is_india_batch = any(
             ((l.country or "").upper() == "IN")
@@ -1240,6 +1245,7 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
             item.rank = i + 1
 
         if is_india_batch:
+            # ── India dual-track (unchanged behaviour) ──
             from india_pricing import parse_inr
             from hospitality_scorer import _parse_price as _pp
 
@@ -1264,6 +1270,29 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
             batch.ranked_by_price = cloned
             logger.info(
                 "India batch: %d listings ranked by quality and price (dual)",
+                len(batch.ranked),
+            )
+        else:
+            # ── US / default dual-track (parallel stream) ──
+            # Lives in its own branch so the next US-only price tweak doesn't
+            # leak into India and the next India-only tweak doesn't leak here.
+            from hospitality_scorer import _parse_price as _pp_us
+
+            def _us_sort_key(item):
+                # USD/EUR/GBP price strings: $12.99 / £8.50 / €7,49.
+                # _parse_price strips the symbol and thousands separators.
+                # Items with no parseable price sink to the bottom.
+                v = _pp_us(item.price or "") or 0.0
+                return v if v > 0 else float("inf")
+
+            price_sorted = sorted(batch.ranked, key=_us_sort_key)
+            cloned = []
+            for i, item in enumerate(price_sorted):
+                c = item.model_copy(update={"rank": i + 1})
+                cloned.append(c)
+            batch.ranked_by_price = cloned
+            logger.info(
+                "US/default batch: %d listings ranked by quality and price (dual)",
                 len(batch.ranked),
             )
 
