@@ -720,6 +720,27 @@ function isIndiaHost(): boolean {
 }
 
 /**
+ * US host detection — mirror of isIndiaHost(). Used to lock the cross-site
+ * pool to US-only retailers when the user is shopping on a US marketplace,
+ * so we don't surface flipkart/nykaa listings in INR they can't buy.
+ *
+ * Conservative: .com TLD on a known US-only retailer (walmart/target/...) is
+ * unambiguous. Plain amazon.com is US. We don't try to localize amazon.co.uk
+ * or amazon.de here — those would need their own pool.
+ */
+function isUSHost(): boolean {
+  const h = window.location.hostname.toLowerCase();
+  if (isIndiaHost()) return false;
+  // amazon.com (and subdomains) — but not amazon.in / .co.uk / .de etc.
+  if (/(^|\.)amazon\.com$/.test(h)) return true;
+  return h.includes("walmart.com") || h.includes("target.com") || h.includes("bestbuy.com")
+      || h.includes("costco.com") || h.includes("homedepot.com") || h.includes("lowes.com")
+      || h.includes("ebay.com") || h.includes("wayfair.com") || h.includes("macys.com")
+      || h.includes("nordstrom.com") || h.includes("sephora.com") || h.includes("cvs.com")
+      || h.includes("walgreens.com") || h.includes("etsy.com") || h.includes("newegg.com");
+}
+
+/**
  * Renders either the single legacy "Rank alternatives" button or, on India
  * platforms, a pair of pills letting the user choose Best Pick vs Best Deal.
  * Both pills share the existing #nirnai-suggestion-rank handler — `data-mode`
@@ -988,6 +1009,10 @@ function onRankAlternativesClick(e: Event): void {
       // tatacliq, meesho). Otherwise the user gets US listings in USD that
       // they can't actually buy from India.
       isIndia: isIndiaHost(),
+      // Symmetric guard for US hosts — locks the pool to US retailers and
+      // forces amazon → amazon.com so we don't surface flipkart/nykaa INR
+      // listings to a US shopper.
+      isUS: isUSHost(),
     } as any);
 }
 

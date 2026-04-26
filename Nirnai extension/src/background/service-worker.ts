@@ -1146,6 +1146,16 @@ chrome.runtime.onMessage.addListener(
         console.log(`NirnAI: India host detected, restricting cross-site pool to: [${sitePool.join(", ")}]`);
       }
 
+      // ═══ US-ONLY GUARD (symmetric to India) ═══
+      // On US hosts, drop India retailers from the pool — a flipkart INR
+      // listing is just as useless to a US shopper as the inverse.
+      const isUS = !!msg.isUS;
+      const US_SHOPPING_SITES = ["amazon", "walmart", "target", "costco", "bestbuy", "homedepot", "lowes", "ebay", "wayfair", "macys", "nordstrom", "cvs", "walgreens", "nike", "apple", "samsung", "dyson"];
+      if (!isTravelSite && isUS && !isIndia) {
+        sitePool = US_SHOPPING_SITES;
+        console.log(`NirnAI: US host detected, restricting cross-site pool to: [${sitePool.join(", ")}]`);
+      }
+
       // For shopping, filter sites to relevant categories based on product domain
       if (!isTravelSite && !isIndia && productDomain) {
         const DOMAIN_SITES: Record<string, string[]> = {
@@ -1193,6 +1203,12 @@ chrome.runtime.onMessage.addListener(
         // (flipkart/nykaa/...) already point at the correct host.
         if (isIndia && site === "amazon" && url.includes("amazon.com")) {
           url = url.replace("https://www.amazon.com", "https://www.amazon.in");
+        }
+        // US guard: defensive — buildCrossSiteUrl already returns amazon.com
+        // for "amazon", but if a future builder ever returned a localised
+        // URL we'd want to force it back to .com here.
+        if (isUS && !isIndia && site === "amazon" && url.includes("amazon.in")) {
+          url = url.replace("https://www.amazon.in", "https://www.amazon.com");
         }
         if (url) siteUrls.push({ site, url });
       }
