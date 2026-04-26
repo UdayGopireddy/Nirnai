@@ -1244,6 +1244,24 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
         for i, item in enumerate(batch.ranked):
             item.rank = i + 1
 
+        # Pre-compute SKU-match identity for the Best Deal filter. We need
+        # this NOW (before _enrich_dual_track runs much later) so the price
+        # track can be restricted to "same product, cheaper" rather than
+        # "anything in the category cheaper". _enrich_dual_track recomputes
+        # the same value later for the canonical batch.ranked list — that's
+        # idempotent (same inputs → same output) so re-doing it is harmless.
+        _origin_brand = (req.origin_product.brand if req.origin_product else "") or ""
+        for _it in batch.ranked:
+            try:
+                _it.sku_match = _sku_match(
+                    origin_title, _origin_brand, _it.title or "", _it.brand or "",
+                )
+            except Exception:
+                # SKU matcher is best-effort. If it blows up on a weird
+                # title we just leave sku_match unset; the fallback in the
+                # filter below will use the full pool.
+                pass
+
         if is_india_batch:
             # ── India dual-track (unchanged behaviour) ──
             from india_pricing import parse_inr
@@ -1258,9 +1276,18 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
                     v = _pp(item.price or "") or 0.0
                 return v if v > 0 else float("inf")
 
+            # Best Deal = SAME product, cheaper place to buy. Filter to
+            # listings the SKU matcher flagged as high/medium confidence —
+            # category-level alternatives belong on Best Pick, not here.
+            same_sku = [it for it in batch.ranked
+                        if (it.sku_match or "").lower() in ("high", "medium")]
+            # Fall back to the full pool if SKU detection failed for everyone
+            # (matcher is best-effort and can return "low" / "" on noisy data).
+            pool = same_sku if same_sku else batch.ranked
+
             # Build a price-ordered copy without mutating `ranked`. Re-rank
             # numbers within `ranked_by_price` so the UI can render 1..N.
-            price_sorted = sorted(batch.ranked, key=_india_sort_key)
+            price_sorted = sorted(pool, key=_india_sort_key)
             cloned = []
             for i, item in enumerate(price_sorted):
                 # Pydantic .model_copy keeps the same nested objects but lets
@@ -1269,8 +1296,8 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
                 cloned.append(c)
             batch.ranked_by_price = cloned
             logger.info(
-                "India batch: %d listings ranked by quality and price (dual)",
-                len(batch.ranked),
+                "India batch: %d ranked, %d same-SKU shortlist for Best Deal",
+                len(batch.ranked), len(cloned),
             )
         else:
             # ── US / default dual-track (parallel stream) ──
@@ -1285,15 +1312,22 @@ async def compare_rank(req: BatchRankRequest) -> BatchResponse:
                 v = _pp_us(item.price or "") or 0.0
                 return v if v > 0 else float("inf")
 
-            price_sorted = sorted(batch.ranked, key=_us_sort_key)
+            # Same-SKU filter as India branch. Best Deal answers "where is
+            # THIS product cheaper", not "is there anything in the category
+            # cheaper" — the latter is what Best Pick already covers.
+            same_sku = [it for it in batch.ranked
+                        if (it.sku_match or "").lower() in ("high", "medium")]
+            pool = same_sku if same_sku else batch.ranked
+
+            price_sorted = sorted(pool, key=_us_sort_key)
             cloned = []
             for i, item in enumerate(price_sorted):
                 c = item.model_copy(update={"rank": i + 1})
                 cloned.append(c)
             batch.ranked_by_price = cloned
             logger.info(
-                "US/default batch: %d listings ranked by quality and price (dual)",
-                len(batch.ranked),
+                "US/default batch: %d ranked, %d same-SKU shortlist for Best Deal",
+                len(batch.ranked), len(cloned),
             )
 
     # ── Origin-gating: cap alternatives that are WORSE than the original ──
